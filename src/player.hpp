@@ -43,8 +43,13 @@
          double duration = _snd_player.duration.load();
          _graph.start_stream();
         const size_t term_height = tui::get_height();
-        const size_t osc_height = term_height - 4; 
-        const size_t total_height = osc_height + 2; 
+        const size_t osc_height = (term_height > 4) ? (term_height - 4) : 1;
+        // Ensure rendered oscilloscope height is odd so we have a single center row
+        size_t printed_osc_height = (osc_height % 2 == 0) ? (osc_height + 1) : osc_height;
+        const size_t total_height = printed_osc_height + 3; 
+        const bool odd = (printed_osc_height % 2 == 1);
+        if(odd) 
+            printed_osc_height--;
 
          while (true)
          {
@@ -73,7 +78,7 @@
 
              tui::clear_line();
              std::cout << "\n";
-             tui::multiline_oscilloscope(_audio_buffer.get(), read, osc_height, log_scale);
+             tui::multiline_oscilloscope(_audio_buffer.get(), read, printed_osc_height, log_scale);
              tui::clear_line();
              tui::set_color(tui::color::bright_cyan);
              std::cout << "\rᚷrune Playing... " << pos_ss.str() << " / " << dur_ss.str() << "\n";
@@ -112,9 +117,7 @@
             }
             input.disable_raw();
 
-
-
-             tui::move_up(3 + osc_height);
+             tui::move_up(3 + printed_osc_height);
          }
      }
 

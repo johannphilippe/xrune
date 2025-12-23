@@ -215,7 +215,12 @@ namespace tui
         // prepare empty plane (lines rows, width columns)
         std::vector<std::string> plane(lines, std::string(width, ' '));
 
-        // sample each column (time on X)
+    // compute a consistent center index (use lround so even/odd heights
+    // map consistently). We'll use this for mapping and labels so v==0
+    // always maps to the same center row.
+    size_t center_index = static_cast<size_t>(std::lround((lines - 1) / 2.0));
+
+    // sample each column (time on X)
         for (size_t x = 0; x < width; ++x)
         {
             // map x in [0,width-1] to sample index in [0,size-1]
@@ -227,13 +232,12 @@ namespace tui
             if (!log_scale)
             {
                 // linear: assume data already scaled in [-1,1]
+                // compute row with rounding so v==0 maps consistently to the
+                // same center row we use for labels.
                 double norm = (v + 1.0) / 2.0; // 0..1
-                if (norm <= 0.0)
-                    row = lines - 1;
-                else if (norm >= 1.0)
-                    row = 0;
-                else
-                    row = static_cast<size_t>((1.0 - norm) * (lines - 1) + 0.5);
+                double pos = (1.0 - norm) * (lines - 1);
+                row = static_cast<size_t>(std::lround(pos));
+                if (row >= lines) row = lines - 1;
             }
             else
             {
@@ -252,8 +256,8 @@ namespace tui
                 if (nd < 0.0) nd = 0.0;
                 if (nd > 1.0) nd = 1.0;
 
-                size_t center = (lines - 1) / 2;
-                size_t max_off = center;
+                size_t center = center_index;
+                size_t max_off = center_index;
                 size_t off = static_cast<size_t>(nd * max_off + 0.5);
                 if (v >= 0.0)
                 {
@@ -275,17 +279,26 @@ namespace tui
 
         // right-side tick labels (match chosen scale)
         std::vector<std::pair<size_t, std::string>> labels;
-        if (!log_scale)
+    if (!log_scale)
         {
-            // linear labels: show amplitude values
+            // linear labels: compute using the same center as the mapping so
+            // the center label is exactly 0.0. Use a floating center to make
+            // labels consistent for even/odd heights.
+            double center_d = (lines - 1) / 2.0;
             for (size_t t = 0; t < 5; ++t)
             {
-                size_t r = static_cast<size_t>((static_cast<double>(t) / 4.0) * (lines - 1));
-                double amp = 1.0 - (static_cast<double>(r) / (lines - 1)) * 2.0; // map back to [-1,1]
+                size_t r = static_cast<size_t>(std::lround((static_cast<double>(t) / 4.0) * (lines - 1)));
+                double amp = 0.0;
+                // Use integer center_index so the center tick maps exactly to 0.00
+                if (center_index != 0)
+                {
+                    amp = (static_cast<double>(center_index) - static_cast<double>(r)) / static_cast<double>(center_index); // range [-1..1]
+                }
                 std::ostringstream oss;
                 oss.setf(std::ios::fixed);
                 oss.precision(2);
-                oss << (amp >= 0.0 ? ' ' : '-') << std::abs(amp);
+                if (amp >= 0.0) oss << ' ';
+                oss << std::setw(4) << amp;
                 labels.emplace_back(r, oss.str());
             }
         }
@@ -294,11 +307,11 @@ namespace tui
             // log labels: produce symmetric labels around the center baseline.
             // Center shows `baseline_db` (e.g. -70 dB). Top and bottom show 0 dB.
             const double baseline_db = -70.0;
-            size_t center = (lines - 1) / 2;
-            size_t max_off = center;
+            size_t center = center_index;
+            size_t max_off = center_index;
             for (size_t t = 0; t < 5; ++t)
             {
-                size_t r = static_cast<size_t>((static_cast<double>(t) / 4.0) * (lines - 1));
+                size_t r = static_cast<size_t>(std::lround((static_cast<double>(t) / 4.0) * (lines - 1)));
                 size_t dist = (r > center) ? (r - center) : (center - r);
                 double nd = (max_off == 0) ? 0.0 : (static_cast<double>(dist) / max_off);
                 if (nd < 0.0) nd = 0.0;
@@ -315,7 +328,7 @@ namespace tui
         // print plane top-down, attaching labels to the right
         for (size_t r = 0; r < lines; ++r)
         {
-            bool center_line = r == (lines - 1) / 2;
+            bool center_line = r == (lines) / 2;
             if(center_line) {
                 set_color(color::bright_yellow);
             } else {
