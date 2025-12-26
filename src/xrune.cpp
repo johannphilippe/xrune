@@ -22,7 +22,7 @@ struct xrune_options
     bool log_scale = false;
     bool play = false;
     std::string audio_file = "";
-    size_t ksmps = 128;
+    size_t ksmps = 512;
     size_t samplerate = 48000;
 };
 

@@ -4,12 +4,12 @@
  #include "utilities.h"
  #include "tui.hpp"
 
- // To remove later
  #include <chrono>
  #include <thread>
  #include <iomanip>
  #include <sstream>
  #include <cmath>
+ #include <vector>
 
  namespace xrune {
 
@@ -19,44 +19,56 @@
         size_t ksmps = 128, size_t samplerate = 48000)
          : _snd_player(filename, loop, ksmps, samplerate)
          , _graph(0, _snd_player.n_outputs, _snd_player.bloc_size, _snd_player.sample_rate)
-         , _exchange_buffer(_snd_player.bloc_size)
-         , _audio_buffer(new double[_snd_player.bloc_size], std::default_delete<double[]>())
+         , _exchange_buffers(_snd_player.n_outputs, _snd_player.bloc_size)
+         , _audio_buffers(_snd_player.n_outputs, std::vector<double>(_snd_player.bloc_size) )
          , log_scale(log_sc)
      {
          _graph.add_node(&_snd_player);
          _snd_player.post_process_callback = [this](node<double>* n)
          {
-             size_t read = 0;
-             while (read < n->bloc_size)
-             {
-                 size_t cnt = _exchange_buffer.write(n->outputs[0] + read, n->bloc_size - read);
-                 read += cnt;
-                 if (cnt == 0) // Buffer full, wait a bit
-                     return;
-             }
+            for(size_t ch = 0; ch < n->n_outputs; ++ch)
+            {
+                size_t read = 0;
+                while (read < n->bloc_size)
+                {
+                    size_t cnt = _exchange_buffers[ch].write(n->outputs[ch] + read, n->bloc_size - read);
+                    read += cnt;
+                    if (cnt == 0) // Buffer full for this channel, skip it
+                        break;  // Break inner loop, continue to next channel
+                }
+            }
          };
      }
 
      void run()
      {
+        tui::multi_channel_oscilloscope osc;
+        osc.base_height = tui::get_height() - 4;
+        osc.log_scale = log_scale;
+
         tui::console_input input;
          double duration = _snd_player.duration.load();
          _graph.start_stream();
         const size_t term_height = tui::get_height();
-        const size_t osc_height = (term_height > 4) ? (term_height - 4) : 1;
-        // Ensure rendered oscilloscope height is odd so we have a single center row
-        size_t printed_osc_height = (osc_height % 2 == 0) ? (osc_height + 1) : osc_height;
-        const size_t total_height = printed_osc_height + 3; 
-        const bool odd = (printed_osc_height % 2 == 1);
-        if(odd) 
-            printed_osc_height--;
+        // Use a conservative oscilloscope height that fits in most terminals
+        // Start with: available height minus 3 lines for status/progress
+        const size_t available_height = (term_height > 5) ? (term_height - 5) : 1;
+        // Force to odd for center row symmetry
+        size_t printed_osc_height = (available_height % 2 == 0) ? (available_height - 1) : available_height;
+        // Extra safety: if still too large, reduce
+        while (printed_osc_height + 3 > term_height) {
+            printed_osc_height -= 2;
+        }
+        const size_t total_height = printed_osc_height + 3;
+
+
+        // Position cursor at a safe home before first frame
+        std::cout << "\033[H";
+        std::cout.flush();
 
          while (true)
          {
-             // Read from exchange buffer (mono)
-             size_t read = _exchange_buffer.read(_audio_buffer.get(), _snd_player.bloc_size);
-
-             std::this_thread::sleep_for(std::chrono::milliseconds(33)); // Approx 30 FPS
+             std::this_thread::sleep_for(std::chrono::milliseconds(16)); // Approx 30 FPS
 
              // Format stable position string as MM:SS.mmm to avoid 1-char jitter
              double posf = _snd_player.position.load();
@@ -76,19 +88,44 @@
              std::ostringstream dur_ss;
              dur_ss << std::setfill('0') << dur_m << ":" << std::setw(2) << dur_sec;
 
-             tui::clear_line();
+             // Move to home and clear display
+             std::cout << "\033[H\033[J";
+             std::cout.flush();
+
+             // Oscilloscope 
+             osc.clear();
+             osc.lines = printed_osc_height;
+             
+             size_t channels_with_data = 0;
+             for(size_t ch = 0; ch < _snd_player.n_outputs; ++ch)
+             {
+                
+                size_t read = _exchange_buffers[ch].read(_audio_buffers[ch].data(), _snd_player.bloc_size);
+                if (read > 0) channels_with_data++;
+                tui::color color = tui::sig_colors[ch % tui::sig_colors.size()];
+                osc.set_channel(_audio_buffers[ch].data(), read, 
+                    tui::sig_chars[ch % tui::sig_chars.size()], color);
+
+             }
+
+             osc.render();
+
+             // Blank line separator
              std::cout << "\n";
-             tui::multiline_oscilloscope(_audio_buffer.get(), read, printed_osc_height, log_scale);
-             tui::clear_line();
+             
+             // Playing info line
              tui::set_color(tui::color::bright_cyan);
-             std::cout << "\rᚷrune Playing... " << pos_ss.str() << " / " << dur_ss.str() << "\n";
-             tui::clear_line();
+             std::cout << "ᚷrune Playing... " << pos_ss.str() << " / " << dur_ss.str() 
+                       << " [" << _snd_player.n_outputs << " ch, " << channels_with_data << " data]\n";
+             
+             // Progress bar line
              tui::set_color(tui::color::bright_yellow);
              tui::progress_bar(static_cast<float>(posf), static_cast<float>(duration));
              std::cout << "\n";
+             std::cout.flush();
 
             input.enable_raw();
-            std::optional<char> c = tui::console_input::read_char();
+            std::optional<char> c = input.read_char();
             if (c.has_value()) {
                 char ch = c.value();
                 switch(ch)
@@ -97,16 +134,11 @@
                         input.disable_raw();
                         _graph.stop_stream();
                         
-                        for(size_t i = 0; i < total_height; ++i)
-                        {
-                            tui::move_up(1);
-                            tui::clear_line();
-                        }
-
-                        std::cout << "\nExiting player.\n";
+                        std::cout << "\033[H\033[J";
+                        std::cout.flush();
                         return;
                     case 'm':
-                        log_scale = !log_scale;
+                        osc.log_scale = !osc.log_scale;
                         break;
                     case 'r':
                         _snd_player.seek(0);
@@ -116,16 +148,14 @@
                 }
             }
             input.disable_raw();
-
-             tui::move_up(3 + printed_osc_height);
          }
      }
 
  protected:
      sndread_node<double> _snd_player;
      rtgraph<double> _graph;
-     spsc<double> _exchange_buffer;
-     std::shared_ptr<double> _audio_buffer;
+     std::vector< spsc<double> > _exchange_buffers;
+     std::vector< std::vector<double> > _audio_buffers;
      bool log_scale;
  };
 

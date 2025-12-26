@@ -13,19 +13,19 @@
 
 # Features 
 
- ᚷ Realtime audio playback 
- ᚷ Modern C++ API (Miniaudio base for now)
+ ᚷ Realtime audio playback \
+ ᚷ Modern C++ API (Miniaudio base for now) \
  ᚷ CLI client for realtime playback features 
 
 # To do
 
- ᚷ Fix graph issues (complex tests, & why remove duplicates)
- ᚷ Enable realtime connection / disconnection in graph
- ᚷ Move node declaration outside of combinator3000.h (node.h)
- ᚷ Create custom memory allocator (with new overload ? )
- ᚷ Check that nodes that doesn't require their own memory can just forward pointer of upstream
- ᚷ Generalize threading protection (lock free)
- ᚷ Move utilities to a separated library (outside combinator3000)
- ᚷ Jack working : either miniaudio or rtaudio 
+ ᚷ Fix graph issues (complex tests, & why remove duplicates) \
+ ᚷ Enable realtime connection / disconnection in graph \
+ ᚷ Move node declaration outside of combinator3000.h (node.h) \
+ ᚷ Create custom memory allocator (with new overload ? ) \
+ ᚷ Check that nodes that doesn't require their own memory can just forward pointer of upstream \
+ ᚷ Generalize threading protection : lock free     
+ ᚷ Move utilities to a separated library (outside combinator3000)     
+ ᚷ Jack working : either miniaudio or rtaudio    
  ᚷ Csound playback engine : enabled at compile time (CMake)
 
