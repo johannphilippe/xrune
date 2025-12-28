@@ -6,7 +6,7 @@
 - Added simple CLI audio player with basic TUI (progression, waveform, user input)
 
 ## Bugfix : 
-- 
+- Jack working with RtAudio (Linux) -> Only if KSMPS matches 
 
 
 

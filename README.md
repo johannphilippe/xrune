@@ -21,11 +21,14 @@
 
  ᚷ Fix graph issues (complex tests, & why remove duplicates) \
  ᚷ Enable realtime connection / disconnection in graph \
- ᚷ Move node declaration outside of combinator3000.h (node.h) \
+ ᚷ Move node declaration outside of combinator3000.h (node.h, base_nodes.h etc) \
  ᚷ Create custom memory allocator (with new overload ? ) \
+  - Problem with nodes allocation : they should not do it on their own (only when entering a graph) \
+  - Possibility to resize bloc size (Jack context) \
  ᚷ Check that nodes that doesn't require their own memory can just forward pointer of upstream \
+  - (problem if same output of upstream is connected to several nodes : each can modify the data) \
  ᚷ Generalize threading protection : lock free     
  ᚷ Move utilities to a separated library (outside combinator3000)     
- ᚷ Jack working : either miniaudio or rtaudio    
  ᚷ Csound playback engine : enabled at compile time (CMake)
+ ᚷ Jack needs resampling when ksmps is a divisor of Jack bloc size 
 
