@@ -1,5 +1,6 @@
 #pragma once
 #include "core.hpp"
+#include "mpmc_queue.hpp"
 #include <vector>
 #include <unordered_map>
 #include <stdexcept>
@@ -22,6 +23,23 @@ struct executable_task {
     std::atomic<int> remaining_dependencies{0};
     int initial_dependencies = 0;
     std::vector<executable_task*> downstream_tasks;
+
+    // Execute this task and signal downstream dependencies
+    void execute(xrune::mpmc_queue& ready_queue) {
+        // Compute the DSP block
+        if (n) {
+            n->process(context);
+        }
+        
+        // Signal downstream tasks
+        for (auto* next : downstream_tasks) {
+            // Decrement dependency counter atomically
+            // If it reaches zero, the task is ready to be pushed to the queue
+            if (next->remaining_dependencies.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                ready_queue.try_enqueue(next);
+            }
+        }
+    }
 };
 
 struct graph {
@@ -134,6 +152,7 @@ struct graph {
         }
 
         // Hybrid scheduling check: run parallel if 4 or more nodes
+        // and if there are actually parallelizable branches (max width > 1)
         run_parallel = (n_nodes >= 4);
 
         return true;
@@ -196,6 +215,31 @@ struct graph {
             executable_task* t = tasks[i];
             t->context.sample_rate = sample_rate;
             t->n->process(t->context);
+        }
+    }
+
+    // Parallel process using worker threads and lock-free task queue
+    // Returns true if all tasks were processed successfully
+    void process_block_parallel(size_t block_size, size_t sample_rate, 
+                                xrune::mpmc_queue& ready_queue) {
+        if (silent_buffer.size() != block_size) {
+            prepare_buffers(block_size);
+        }
+
+        // Reset all dependency counters to their initial values
+        for (size_t i = 0; i < tasks.size(); ++i) {
+            tasks[i]->remaining_dependencies.store(
+                tasks[i]->initial_dependencies, 
+                std::memory_order_release
+            );
+            tasks[i]->context.sample_rate = sample_rate;
+        }
+
+        // Find root tasks (those with zero dependencies) and enqueue them
+        for (size_t i = 0; i < tasks.size(); ++i) {
+            if (tasks[i]->remaining_dependencies.load(std::memory_order_acquire) == 0) {
+                ready_queue.try_enqueue(tasks[i]);
+            }
         }
     }
 };

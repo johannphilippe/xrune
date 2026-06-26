@@ -1,11 +1,13 @@
 #pragma once
 #include "core.hpp"
 #include "graph.hpp"
+#include "worker_pool.hpp"
 #include <RtAudio.h>
 #include <readerwriterqueue.h>
 #include <vector>
 #include <iostream>
 #include <algorithm>
+#include <memory>
 
 namespace xrune {
 
@@ -42,17 +44,23 @@ struct engine {
     moodycamel::ReaderWriterQueue<command_event> command_queue;
     moodycamel::ReaderWriterQueue<telemetry_event> telemetry_queue;
 
+    // Worker thread pool for parallel execution
+    std::unique_ptr<worker_pool> workers;
+    size_t num_worker_threads = 0;
+
     engine() = default;
     
     ~engine() {
         stop();
     }
 
-    bool init(size_t sr = 48000, size_t bs = 128, size_t ins = 0, size_t outs = 2) {
+    bool init(size_t sr = 48000, size_t bs = 128, size_t ins = 0, size_t outs = 2, 
+               size_t num_workers = 0) {
         sample_rate = sr;
         block_size = bs;
         input_channels = ins;
         output_channels = outs;
+        num_worker_threads = num_workers;
 
         // Pre-reserve active graphs to prevent allocations on the audio thread
         active_graphs.clear();
@@ -103,6 +111,12 @@ struct engine {
         if (!dac.isStreamOpen()) return false;
         if (dac.isStreamRunning()) return true;
         
+        // Start worker threads for parallel execution if not already running
+        if (num_worker_threads > 0 && !workers) {
+            workers = std::make_unique<worker_pool>(num_worker_threads);
+            workers->start();
+        }
+        
         rt::audio::RtAudioErrorType err = dac.startStream();
         if (err != rt::audio::RTAUDIO_NO_ERROR) {
             std::cerr << "RtAudio error on startStream: " << dac.getErrorText() << std::endl;
@@ -112,6 +126,12 @@ struct engine {
     }
 
     void stop() {
+        // Stop worker threads first
+        if (workers) {
+            workers->stop();
+            workers.reset();
+        }
+        
         if (dac.isStreamRunning()) {
             dac.stopStream();
         }
@@ -210,7 +230,30 @@ struct engine {
                 }
             }
 
-            g->process_block(n_frames, sample_rate);
+            // Use parallel execution if available and graph supports it
+            if (workers && g->run_parallel && g->tasks.size() >= 4) {
+                g->process_block_parallel(n_frames, sample_rate, workers->get_ready_queue());
+                
+                // Wait for all tasks to complete by checking the ready queue
+                // This is a simple approach - we wait until all tasks have been processed
+                // In a more sophisticated implementation, we could use a completion counter
+                // For now, we'll do a simple busy-wait
+                bool all_done = false;
+                size_t wait_count = 0;
+                const size_t max_wait = 1000; // Prevent infinite loops
+                
+                // Wait for the ready queue to be empty and no active workers
+                while (!all_done && wait_count < max_wait) {
+                    all_done = workers->get_ready_queue().empty() && 
+                              workers->get_active_count() == 0;
+                    if (!all_done) {
+                        worker_pool::rt_yield();
+                        wait_count++;
+                    }
+                }
+            } else {
+                g->process_block(n_frames, sample_rate);
+            }
 
             if (g->output_node) {
                 size_t out_idx = g->node_to_index[g->output_node];

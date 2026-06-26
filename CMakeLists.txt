@@ -31,9 +31,18 @@ add_executable(xrune
     src/xrune.cpp
     )
 
+add_executable(xrune_parallel_demo 
+    src/xrune_parallel_demo.cpp
+    )
+
 target_include_directories(xrune 
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+
+target_include_directories(xrune_parallel_demo 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
 # Link against the fetched libraries
 target_link_libraries(xrune PRIVATE rtaudio readerwriterqueue)
+target_link_libraries(xrune_parallel_demo PRIVATE rtaudio readerwriterqueue)
