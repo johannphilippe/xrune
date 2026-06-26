@@ -1,39 +1,39 @@
 cmake_minimum_required(VERSION 3.20)
 
-include(FetchContent)
-
 project(xrune LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake/Modules/)
 
-option(TESTS "Build test executable" ON)
-option(BUILD_FAUST_JIT_NODE "Build Faust JIT (require LLVM) node" ON)
-option(BUILD_CSOUND_NODE "Build Csound node (also enables Csound graph)" ON)
-option(BUILD_SNDFILE_NODE "Build Sndfile nodes" ON)
+include(FetchContent)
+
+# Fetch the latest RtAudio
+FetchContent_Declare(
+    rtaudio
+    GIT_REPOSITORY https://github.com/thestk/rtaudio.git
+    GIT_TAG        master
+)
+
+# Fetch Moodycamel ReaderWriterQueue
+FetchContent_Declare(
+    readerwriterqueue
+    GIT_REPOSITORY https://github.com/cameron314/readerwriterqueue.git
+    GIT_TAG        master
+)
+
+# Avoid building RtAudio tests and unwanted options to keep it lightweight
+set(RTAUDIO_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(RTAUDIO_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(rtaudio readerwriterqueue)
 
 add_executable(xrune 
     src/xrune.cpp
-    src/player.hpp
-    src/tui.hpp
     )
-
-
-add_subdirectory(src/combinator3000)
 
 target_include_directories(xrune 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/combinator3000/src
     )
 
-set(XRUNE_LIBRARIES combinator3000)
-if(BUILD_CSOUND_NODE)
-    find_package(Csound REQUIRED)
-    target_compile_definitions(xrune PUBLIC CSOUND_GRAPH)
-    set(XRUNE_LIBRARIES ${XRUNE_LIBRARIES} ${CSOUND_LIBRARIES})
-endif()
-
-target_link_libraries(
-    xrune PUBLIC ${XRUNE_LIBRARIES}
-)
+# Link against the fetched libraries
+target_link_libraries(xrune PRIVATE rtaudio readerwriterqueue)

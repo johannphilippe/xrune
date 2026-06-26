@@ -1,123 +1,95 @@
+#include "core.hpp"
+#include "graph.hpp"
+#include "standard_nodes.hpp"
+#include "engine.hpp"
 #include <iostream>
-#include "player.hpp"
-#include "xrune.h"
+#include <thread>
+#include <chrono>
 
-using namespace std;
+int main() {
+    std::cout << "--- Xrune Stage 3 Real-Time Safety & Lock-Free IPC ---" << std::endl;
 
-constexpr const char * version = "0.0";
+    xrune::oscillator osc_l(440.0);
+    xrune::oscillator osc_r(660.0);
+    xrune::gain gain_l(0.25);
+    xrune::gain gain_r(0.25);
+    xrune::stereo_fader fader(0.4);
 
-bool is_parameter(const char* arg)
-{
-    return arg[0] == '-';
-}
+    xrune::graph g;
+    g.add_node(&osc_l);
+    g.add_node(&osc_r);
+    g.add_node(&gain_l);
+    g.add_node(&gain_r);
+    g.add_node(&fader);
 
-void print_xrune()
-{
-    cout << "\\|/" << endl << " X " << endl << "/|\\" << endl; 
-}
+    g.connect(&osc_l, 0, &gain_l, 0);
+    g.connect(&gain_l, 0, &fader, 0);
 
-int parse_command_line(int argc, char* argv[], xrune::options &options)
-{
-    // Parse command line arguments
-    for(size_t i = 0; i < argc; ++i) 
-    {
-        if(is_parameter(argv[i]))
-        {
-            std::string param(argv[i]);
-            if(param == "-h" || param == "--help") 
-            {
-                options.exit_after_parse = true;
-                std::cout << "xrune [options]" << std::endl;
-                std::cout << "Options:" << std::endl;
-                std::cout << "  -h, --help          Show this help message" << std::endl;
-                std::cout << "  -v, --version       Show version information" << std::endl;
-                std::cout << "  -rt, --runtime      Audio Runtime : RtAudio (default), Miniaudio, or Csound" << std::endl;
-                std::cout << "  -d, --driver        Audio Driver (Alsa, Jack, CoreAudio etc...)" << std::endl;
-                std::cout << "  -p, --play          Play soundfile" << std::endl;
-                std::cout << "  -l, --loop          Loop playback (--play)" << std::endl;
-                std::cout << "  -log, --log-scale   Log scale for oscilloscope (--play)" << std::endl;
-                return 0;
-            } else if (param == "-v" || param == "--version")
-            {
-                options.exit_after_parse = true;
-                std::cout << "xrune version" << version << std::endl;
-                return 0;
-            } else if (param == "-p" || param == "--play") 
-            {
-                std::cout << "Audio playback mode" << std::endl;
-                // First make sure an audio file is provided 
-                if( (i + 1) >= argc ) 
-                {
-                    std::cerr << "Error: No audio file provided for playback. Missing argument" << std::endl;
-                    options.exit_after_parse = true;
-                    return -1;
-                }
+    g.connect(&osc_r, 0, &gain_r, 0);
+    g.connect(&gain_r, 0, &fader, 1);
 
-                std::cout << "Starting  audio playback... " << std::endl;
+    g.output_node = &fader;
 
-                options.play = true;
-                options.audio_file = std::string( argv[i + 1] ) ; 
-            } else if(param == "-l" || param == "--loop")
-            {
-                options.loop = true;
-            } else if(param == "-log" || param == "--log-scale")
-            {
-                options.log_scale = true;
-            } else if(param == "-ksmps" || param == "--ksmps")
-            {
-                options.ksmps = std::stoul( std::string( argv[i + 1] ) );
-            } else if(param == "-sr" || param == "--samplerate")
-            {
-                options.samplerate = std::stoul( std::string( argv[i + 1] ) );
-            } else if(param == "-rt" || param == "--runtime") 
-            {
-                if( (i + 1) >= argc ) 
-                {
-                    std::cerr << "Error: No runtime provided" << std::endl;
-                    options.exit_after_parse = true;
-                    return -1;
-                }
-                std::string rtarg = argv[i+1];
-                options.runtime = xrune::parse_runtime( rtarg );
-            } else if(param == "-d" || param == "--driver")
-            {
-                if( (i + 1) >= argc ) 
-                {
-                    std::cerr << "Error: No driver provided" << std::endl;
-                    options.exit_after_parse = true;
-                    return -1;
-                }
-                std::string darg = argv[i+1];
-                options.driver = xrune::parse_driver( darg );
-            }
-
-
-        }
+    std::cout << "Compiling graph blueprint on main thread..." << std::endl;
+    if (!g.compile()) {
+        std::cerr << "Graph compilation failed!" << std::endl;
+        return 1;
     }
-}
+    std::cout << "Graph compiled successfully." << std::endl;
 
-int main(int argc, char* argv[])
-{
-    cout << "ᚷrune audio engine" << endl;
+    xrune::engine eng;
+    size_t sample_rate = 44100;
+    size_t block_size = 256;
+    size_t input_channels = 0;
+    size_t output_channels = 2;
 
-    xrune::options options; 
-    int exit_code = parse_command_line(argc, argv, options);
-
-    if(options.exit_after_parse)
-    {
-        return exit_code;
+    if (!eng.init(sample_rate, block_size, input_channels, output_channels)) {
+        std::cerr << "Engine initialization failed!" << std::endl;
+        return 1;
     }
 
-    if(options.play) 
-    {
-        xrune::player p(options);
-        //xrune::player p(options.audio_file, options.loop, options.log_scale, options.ksmps, options.samplerate);
-        p.run();
+    std::cout << "Registering graph to engine (lock-free)..." << std::endl;
+    eng.register_graph(&g);
+
+    std::cout << "Starting audio stream..." << std::endl;
+    if (!eng.start()) {
+        std::cerr << "Failed to start audio stream!" << std::endl;
+        return 1;
     }
 
-    // Default options 
-    bool loop = false;
-    bool play = false; 
+    // Play initial frequencies
+    std::cout << "Playing Initial Frequencies (Left: 440 Hz, Right: 660 Hz)..." << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    return exit_code;
+    // Dynamic parameter updates (frequency sweeps via SPSC command queue)
+    std::cout << "Sweeping frequencies via lock-free parameter commands..." << std::endl;
+    std::cout << "New targets -> Left: 220 Hz, Right: 330 Hz" << std::endl;
+    eng.set_parameter(&osc_l, 0, 220.0);
+    eng.set_parameter(&osc_r, 0, 330.0);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // Flag graph completion (simulating lifecycle end)
+    std::cout << "Signaling graph completion (finished_flag)..." << std::endl;
+    g.finished_flag = true;
+
+    // Wait a brief moment and check telemetry/cleanup queue
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    xrune::graph* completed = nullptr;
+    if (eng.dequeue_completed_graph(completed)) {
+        std::cout << "Successfully dequeued completed graph pointer [address: " 
+                  << completed << "] on the main thread for safe garbage collection!" << std::endl;
+    } else {
+        std::cout << "No completed graphs found in telemetry queue." << std::endl;
+    }
+
+    // Sound should be off now (since graph was removed from active_graphs in the callback)
+    std::cout << "Sound should be silent now. Waiting for 1 second..." << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    std::cout << "Stopping stream..." << std::endl;
+    eng.stop();
+    std::cout << "Engine stopped. Done." << std::endl;
+
+    return 0;
 }
