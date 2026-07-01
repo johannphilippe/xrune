@@ -123,8 +123,31 @@ struct graph_instance {
 
     audio_buffer_view output_view(size_t ch) const {
         const size_t idx = static_cast<size_t>(sched->bp->output_node);
+        return node_output_view(idx, ch);
+    }
+
+    // A node's output buffer for a given channel (also used as the writable
+    // entry buffer of a bus_input node for input terminals).
+    audio_buffer_view node_output_view(size_t node_index, size_t ch) const {
         return audio_buffer_view(
-            buffer_pool + (sched->output_slot_base[idx] + ch) * block_size, block_size);
+            buffer_pool + (sched->output_slot_base[node_index] + ch) * block_size, block_size);
+    }
+
+    // ---- Terminal access (cross-instance routing, Phase 3) ----
+    size_t output_terminal_count() const { return sched->bp->output_terminals.size(); }
+    size_t input_terminal_count() const { return sched->bp->input_terminals.size(); }
+
+    size_t output_terminal_channels(size_t t) const {
+        return sched->bp->nodes[sched->bp->output_terminals[t].node]->outputs_count();
+    }
+    size_t input_terminal_channels(size_t t) const {
+        return sched->bp->nodes[sched->bp->input_terminals[t].node]->outputs_count();
+    }
+    audio_buffer_view output_terminal_view(size_t t, size_t ch) const {
+        return node_output_view(sched->bp->output_terminals[t].node, ch);
+    }
+    audio_buffer_view input_terminal_view(size_t t, size_t ch) const {
+        return node_output_view(sched->bp->input_terminals[t].node, ch);
     }
 };
 

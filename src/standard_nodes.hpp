@@ -193,6 +193,20 @@ struct channel_adapter : node {
 };
 
 // ============================================================================
+// BUS INPUT  (stateless: entry point for an instance input terminal)
+// Has no graph inputs; its output buffers are filled by the engine from routed
+// upstream instances before the instance is processed, so process() is a no-op
+// that simply preserves that externally-written signal for downstream nodes.
+// ============================================================================
+struct bus_input : node {
+    size_t n;
+    explicit bus_input(size_t channels = 2) : n(channels) {}
+    size_t inputs_count() const override { return 0; }
+    size_t outputs_count() const override { return n; }
+    void process(void*, const node_processing_context&) const override {}
+};
+
+// ============================================================================
 // MONO->STEREO / STEREO->MONO  (stateless)
 // ============================================================================
 struct mono_to_stereo : node {
