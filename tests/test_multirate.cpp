@@ -69,6 +69,30 @@ int main() {
         for (size_t i = 0; i < out.size; ++i) XR_CHECK_NEAR(out[i], 0.5, 1e-9);
     }
 
+    // --- low-frequency sine survives up->down (half-band preserves passband) ---
+    XR_RUN("oversampling round-trip preserves a sine");
+    {
+        graph_blueprint b;
+        size_t o  = b.add<oscillator>(500.0);  // well below base Nyquist/2
+        size_t up = b.add<upsampler2>();
+        size_t dn = b.add<downsampler2>();
+        b.connect(o, 0, up, 0);
+        b.connect(up, 0, dn, 0);
+        b.set_output(dn);
+        compiled_schedule sd = compile(b, bs);
+        auto vv = instantiate(sd, sr);
+
+        double sumsq = 0.0; size_t count = 0;
+        for (int blk = 0; blk < 400; ++blk) {
+            vv->process();
+            if (blk < 40) continue;             // skip filter warm-up
+            audio_buffer_view o0 = vv->output_view(0);
+            for (size_t i = 0; i < o0.size; ++i) { sumsq += o0[i] * o0[i]; ++count; }
+        }
+        double rms = std::sqrt(sumsq / static_cast<double>(count));
+        XR_CHECK_NEAR(rms, 0.70710678118654752440, 0.02); // amplitude preserved
+    }
+
     // --- block-size axis: downbloc halves the block, doubles the calls ---
     XR_RUN("block-size decrease (downbloc)");
     {
