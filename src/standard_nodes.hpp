@@ -320,6 +320,86 @@ struct white_noise : node {
 };
 
 // ============================================================================
+// UPSAMPLER x2  (rate boundary 2/1): 1 input at rate R -> 1 output at rate 2R.
+// Reads B/2 samples per call, writes B (linear interpolation). Tier-1 adapter.
+// ============================================================================
+struct upsampler2 : node {
+    struct st { sample_t prev; };
+    size_t inputs_count() const override { return 1; }
+    size_t outputs_count() const override { return 1; }
+    size_t rate_num() const override { return 2; }
+    size_t rate_den() const override { return 1; }
+    size_t state_size() const override { return sizeof(st); }
+    size_t state_align() const override { return alignof(st); }
+    void init_state(void* s) const override { static_cast<st*>(s)->prev = 0.0; }
+
+    void process(void* s, const node_processing_context& ctx) const override {
+        auto* x = static_cast<st*>(s);
+        const audio_buffer_view in = ctx.inputs[0];
+        const audio_buffer_view out = ctx.outputs[0];
+        for (size_t j = 0; j < in.size; ++j) {
+            const sample_t v = in[j];
+            out[2 * j]     = (x->prev + v) * 0.5; // interpolated sample
+            out[2 * j + 1] = v;
+            x->prev = v;
+        }
+    }
+};
+
+// ============================================================================
+// DOWNSAMPLER /2  (rate boundary 1/2): 1 input at rate R -> 1 output at rate R/2.
+// Reads 2B samples per call, writes B (averaging low-pass + decimate).
+// ============================================================================
+struct downsampler2 : node {
+    size_t inputs_count() const override { return 1; }
+    size_t outputs_count() const override { return 1; }
+    size_t rate_num() const override { return 1; }
+    size_t rate_den() const override { return 2; }
+
+    void process(void*, const node_processing_context& ctx) const override {
+        const audio_buffer_view in = ctx.inputs[0];
+        const audio_buffer_view out = ctx.outputs[0];
+        for (size_t j = 0; j < out.size; ++j)
+            out[j] = (in[2 * j] + in[2 * j + 1]) * 0.5;
+    }
+};
+
+// ============================================================================
+// DOWNBLOC  (block boundary 1/2): identity passthrough that makes its region
+// run at a finer block (half the samples per call, twice as many calls per
+// cycle) at the same sample rate. Throughput is unchanged, so it regroups the
+// same samples into smaller blocks (e.g. for finer-grained control regions).
+// The inverse (upbloc / block increase) is a cross-cycle case handled by
+// internal-buffering Tier-2 host nodes (FFT, Csound) in a later phase.
+// ============================================================================
+struct downbloc : node {
+    size_t inputs_count() const override { return 1; }
+    size_t outputs_count() const override { return 1; }
+    size_t block_num() const override { return 1; }
+    size_t block_den() const override { return 2; }
+    void process(void*, const node_processing_context& ctx) const override {
+        for (size_t i = 0; i < ctx.block_size; ++i) ctx.outputs[0][i] = ctx.inputs[0][i];
+    }
+};
+
+// ============================================================================
+// CALL COUNTER  (passthrough that counts process() calls; test/introspection)
+// ============================================================================
+struct call_counter : node {
+    struct st { size_t calls; };
+    size_t inputs_count() const override { return 1; }
+    size_t outputs_count() const override { return 1; }
+    size_t state_size() const override { return sizeof(st); }
+    size_t state_align() const override { return alignof(st); }
+    void init_state(void* s) const override { static_cast<st*>(s)->calls = 0; }
+
+    void process(void* s, const node_processing_context& ctx) const override {
+        static_cast<st*>(s)->calls++;
+        for (size_t i = 0; i < ctx.block_size; ++i) ctx.outputs[0][i] = ctx.inputs[0][i];
+    }
+};
+
+// ============================================================================
 // SAMPLE AND HOLD  (port: rate Hz; state: held/counter). rate read per block.
 // ============================================================================
 struct sample_and_hold : node {

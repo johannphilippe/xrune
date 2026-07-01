@@ -77,6 +77,22 @@ struct node {
         return p ? p[i].default_value : 0.0;
     }
 
+    // Multi-rate (Phase 5): output *sample rate* as a ratio of the input rate.
+    // Normal nodes are 1/1. An upsampler is 2/1, a downsampler 1/2. The compiler
+    // propagates these along edges to give every node a region rate (a power of
+    // two), and the scheduler calls the node that many times per cycle. A node
+    // with a non-1/1 ratio is a rate boundary and must read/write using the
+    // per-channel view sizes (which differ across the boundary), not block_size.
+    virtual size_t rate_num() const { return 1; }
+    virtual size_t rate_den() const { return 1; }
+
+    // Output *block size* as a ratio of the input block size (factor of two:
+    // 1/1, 2/1, or 1/2). A downbloc (1/2) makes its region run at a finer block
+    // (more calls per cycle, same sample rate); an upbloc (2/1) runs coarser and
+    // is only valid where the sample-rate region already supplies enough calls.
+    virtual size_t block_num() const { return 1; }
+    virtual size_t block_den() const { return 1; }
+
     // Per-instance mutable DSP state (0 = stateless).
     virtual size_t state_size() const { return 0; }
     virtual size_t state_align() const { return alignof(sample_t); }

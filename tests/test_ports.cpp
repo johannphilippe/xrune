@@ -80,7 +80,7 @@ int main() {
         compiled_schedule sched = compile(bp, bs);
         XR_CHECK(sched.ok);
         // osc must be scheduled before the gain it modulates.
-        XR_CHECK(sched.param_source[amp][0] != SILENT_SLOT);
+        XR_CHECK(!sched.param_source[amp][0].silent());
 
         auto v = instantiate(sched, sr);
 
