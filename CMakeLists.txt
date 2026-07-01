@@ -27,11 +27,21 @@ set(RTAUDIO_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(rtaudio readerwriterqueue)
 
+find_package(Threads REQUIRED)
+
+# Optional sanitizer build: -DXRUNE_SANITIZE=thread (or address/undefined).
+set(XRUNE_SANITIZE "" CACHE STRING "Build with a sanitizer (thread/address/undefined)")
+
 # Shared configuration for all Xrune targets (header-only library for now).
 add_library(xrune_core INTERFACE)
 target_include_directories(xrune_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(xrune_core INTERFACE rtaudio readerwriterqueue)
+target_link_libraries(xrune_core INTERFACE rtaudio readerwriterqueue Threads::Threads)
 target_compile_features(xrune_core INTERFACE cxx_std_20)
+
+if(XRUNE_SANITIZE)
+    target_compile_options(xrune_core INTERFACE -fsanitize=${XRUNE_SANITIZE} -g -O1)
+    target_link_options(xrune_core INTERFACE -fsanitize=${XRUNE_SANITIZE})
+endif()
 
 # --- Executables / demos ---
 add_executable(xrune src/xrune.cpp)
@@ -67,3 +77,7 @@ add_test(NAME ports COMMAND test_ports)
 add_executable(test_multirate tests/test_multirate.cpp)
 target_link_libraries(test_multirate PRIVATE xrune_core)
 add_test(NAME multirate COMMAND test_multirate)
+
+add_executable(test_parallel tests/test_parallel.cpp)
+target_link_libraries(test_parallel PRIVATE xrune_core)
+add_test(NAME parallel COMMAND test_parallel)

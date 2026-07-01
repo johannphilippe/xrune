@@ -4,6 +4,7 @@
 #include "instance_manager.hpp"
 #include "audio_backend.hpp"
 #include "rtaudio_backend.hpp"
+#include "worker_pool.hpp"
 #include <readerwriterqueue.h>
 #include <vector>
 #include <algorithm>
@@ -12,7 +13,6 @@
 
 namespace xrune {
 
-// A routing destination: either the hardware master or an instance input terminal.
 struct route_target {
     bool to_master = true;
     instance_handle instance = null_handle;
@@ -22,31 +22,20 @@ struct route_target {
     static route_target to(instance_handle h, size_t term = 0) { return {false, h, term}; }
 };
 
-enum class command_type {
-    activate,
-    kill,
-    set_parameter,
-    connect,
-    disconnect
-};
+enum class command_type { activate, kill, set_parameter, connect, disconnect };
 
 struct command_event {
     command_type type;
-    instance_handle handle;        // activate/kill/set_parameter target; connect/disconnect source
+    instance_handle handle;
     size_t node_index = 0;
     size_t parameter_index = 0;
     sample_t parameter_value = 0.0;
-    // routing
     size_t src_terminal = 0;
     route_target dest{};
 };
 
-// Audio -> control: a slot has been released and can be recycled.
-struct telemetry_event {
-    uint32_t slot = 0;
-};
+struct telemetry_event { uint32_t slot = 0; };
 
-// A resolved routing edge held on the audio thread.
 struct active_route {
     uint32_t src_slot = 0, src_gen = 0;
     size_t src_terminal = 0;
@@ -55,14 +44,13 @@ struct active_route {
     size_t dst_terminal = 0;
 };
 
-// Audio host + instance graph. Instances are handle-addressed voices; routes
-// wire an instance's output terminal to another instance's input terminal or to
-// the master. The "global bus" is just a permanent instance that voices route
-// into and which routes to the master (no special-case summing).
-//
-// Threading model unchanged from Phase 2 (control builds/frees; audio runs and
-// validates handles against active_gen). Routing is also handle-validated, so a
-// route referencing a dead instance is inert and purged on release.
+// Audio host + instance graph with a lock-free instance manager and an optional
+// worker pool. Instances form a cross-instance routing DAG; the executor runs it
+// either single-threaded or in parallel (Phase 6). Parallelism is per-instance:
+// each instance is a task, workers + the audio thread drain a Vyukov MPMC ready
+// queue, and a `tasks_remaining` atomic is the block barrier. Instances own
+// disjoint arenas and the master is summed single-threaded afterwards, so
+// parallel output is bit-identical to sequential.
 struct engine {
     size_t sample_rate = 48000;
     size_t block_size = 128;
@@ -71,8 +59,8 @@ struct engine {
 
     instance_manager mgr;
 
-    std::vector<uint32_t> active_gen;   // per slot: active generation, 0 = inactive
-    std::vector<uint32_t> active_list;  // slot indices currently processing
+    std::vector<uint32_t> active_gen;
+    std::vector<uint32_t> active_list;
     std::vector<active_route> routes;
 
     std::vector<std::vector<sample_t>> master_buffers;
@@ -82,7 +70,13 @@ struct engine {
 
     std::unique_ptr<audio_backend> backend;
 
-    // Pre-allocated scratch for per-block instance topological ordering.
+    // Parallel execution.
+    size_t num_worker_threads = 0;
+    std::unique_ptr<worker_pool> workers;
+    std::unique_ptr<std::atomic<int>[]> dep;   // per slot: unmet upstream instances
+    size_t parallel_nf = 0;
+
+    // Scratch (single-threaded ordering / reaping).
     std::vector<int> indeg_scratch;
     std::vector<uint32_t> order_scratch;
     std::vector<uint32_t> reap_scratch;
@@ -93,11 +87,12 @@ struct engine {
     void use_backend(std::unique_ptr<audio_backend> b) { backend = std::move(b); }
 
     bool init(size_t sr = 48000, size_t bs = 128, size_t ins = 0, size_t outs = 2,
-              size_t max_instances = 128) {
+              size_t max_instances = 128, size_t num_workers = 0) {
         sample_rate = sr;
         block_size = bs;
         input_channels = ins;
         output_channels = outs;
+        num_worker_threads = num_workers;
 
         mgr.init(max_instances);
         active_gen.assign(max_instances, 0);
@@ -106,6 +101,9 @@ struct engine {
         indeg_scratch.assign(max_instances, 0);
         order_scratch.clear();     order_scratch.reserve(max_instances);
         reap_scratch.clear();      reap_scratch.reserve(max_instances);
+
+        dep = std::make_unique<std::atomic<int>[]>(max_instances);
+        for (size_t i = 0; i < max_instances; ++i) dep[i].store(0, std::memory_order_relaxed);
 
         master_buffers.resize(output_channels);
         for (auto& buf : master_buffers) buf.assign(block_size, 0.0);
@@ -118,45 +116,45 @@ struct engine {
         });
     }
 
-    bool start() { return backend ? backend->start() : false; }
-    void stop() { if (backend) { backend->stop(); backend->close(); } }
+    bool start() {
+        if (num_worker_threads > 0 && !workers) {
+            workers = std::make_unique<worker_pool>(next_pow2(std::max<size_t>(mgr.capacity(), 2)));
+            workers->start(num_worker_threads, [this](uint32_t slot) { execute_instance_task(slot); });
+        }
+        return backend ? backend->start() : false;
+    }
+
+    void stop() {
+        if (workers) { workers->stop(); workers.reset(); }
+        if (backend) { backend->stop(); backend->close(); }
+    }
 
     // ---- Control-thread API ----
 
-    // Build an instance and route its output terminal `src_terminal` to `dest`
-    // (default: the master bus).
     instance_handle spawn(const compiled_schedule& sched, lifetime_policy life = {},
                           route_target dest = {}, size_t src_terminal = 0) {
         reclaim();
         instance_handle h = mgr.create(sched, sample_rate, life);
         if (!h.valid()) return null_handle;
         command_queue.enqueue({command_type::activate, h, 0, 0, 0.0, 0, {}});
-        if (sched.bp->output_terminals.size() > src_terminal) {
-            command_event c{command_type::connect, h, 0, 0, 0.0, src_terminal, dest};
-            command_queue.enqueue(c);
-        }
+        if (sched.bp->output_terminals.size() > src_terminal)
+            command_queue.enqueue({command_type::connect, h, 0, 0, 0.0, src_terminal, dest});
         return h;
     }
 
-    void kill(instance_handle h) {
-        command_queue.enqueue({command_type::kill, h, 0, 0, 0.0, 0, {}});
-    }
-
+    void kill(instance_handle h) { command_queue.enqueue({command_type::kill, h, 0, 0, 0.0, 0, {}}); }
     void set_parameter(instance_handle h, size_t node_index, size_t param, sample_t value) {
         command_queue.enqueue({command_type::set_parameter, h, node_index, param, value, 0, {}});
     }
-
     void connect(instance_handle src, size_t src_terminal, route_target dest) {
         command_queue.enqueue({command_type::connect, src, 0, 0, 0.0, src_terminal, dest});
     }
-
     void disconnect(instance_handle src, size_t src_terminal, route_target dest) {
         command_queue.enqueue({command_type::disconnect, src, 0, 0, 0.0, src_terminal, dest});
     }
 
     size_t reclaim() {
-        size_t n = 0;
-        telemetry_event ev;
+        size_t n = 0; telemetry_event ev;
         while (telemetry_queue.try_dequeue(ev)) { mgr.recycle(ev.slot); ++n; }
         return n;
     }
@@ -171,47 +169,87 @@ struct engine {
         const size_t nf = std::min<size_t>(n_frames, block_size);
 
         drain_commands();
-
         for (auto& buf : master_buffers) std::fill(buf.begin(), buf.end(), 0.0);
 
-        compute_order();
+        // Compute every active instance's output (fills buffers + input terminals).
+        if (workers && active_list.size() >= 2) compute_parallel(nf);
+        else                                    compute_sequential(nf);
 
-        reap_scratch.clear();
-        for (uint32_t slot : order_scratch) {
-            instance_slot& s = mgr.slots[slot];
-            graph_instance* g = s.inst.get();
-
-            // Fill this instance's input terminals from incoming routes.
-            zero_input_terminals(g, nf);
-            for (const auto& r : routes) {
-                if (r.to_master || r.dst_slot != slot) continue;
-                if (!route_live(r)) continue;
-                graph_instance* src = mgr.instance_at(r.src_slot);
-                if (src) sum_terminal_to_instance(src, r.src_terminal, g, r.dst_terminal, nf);
-            }
-
-            g->process();
-
-            if (should_reap(s, g, terminal_peak(g, nf))) reap_scratch.push_back(slot);
-        }
-
-        // Routes to the master, summed after all producers have run.
+        // Deterministic single-threaded finish: sum to master, then reap.
         for (const auto& r : routes) {
             if (!r.to_master || !route_live(r)) continue;
-            graph_instance* src = mgr.instance_at(r.src_slot);
-            if (src) sum_terminal_to_master(src, r.src_terminal, nf);
+            if (auto* src = mgr.instance_at(r.src_slot)) sum_terminal_to_master(src, r.src_terminal, nf);
         }
-
-        for (uint32_t slot : reap_scratch) release_slot(slot);
+        reap_pass(nf);
 
         for (size_t i = 0; i < n_frames; ++i)
             for (size_t ch = 0; ch < output_channels; ++ch)
                 out_buf[i * output_channels + ch] = (i < nf) ? master_buffers[ch][i] : 0.0;
-
         return 0;
     }
 
 private:
+    // ---- Executors ----
+
+    void compute_sequential(size_t nf) {
+        compute_order();
+        for (uint32_t slot : order_scratch) {
+            graph_instance* g = mgr.slots[slot].inst.get();
+            gather_inputs(slot, g, nf);
+            g->process();
+        }
+    }
+
+    void compute_parallel(size_t nf) {
+        parallel_nf = nf;
+
+        for (uint32_t slot : active_list) dep[slot].store(0, std::memory_order_relaxed);
+        for (const auto& r : routes)
+            if (!r.to_master && route_live(r))
+                dep[r.dst_slot].fetch_add(1, std::memory_order_relaxed);
+
+        workers->tasks_remaining.store(static_cast<int>(active_list.size()), std::memory_order_relaxed);
+        workers->block_active.store(true, std::memory_order_release);
+
+        for (uint32_t slot : active_list)
+            if (dep[slot].load(std::memory_order_relaxed) == 0)
+                workers->queue.push(slot);
+
+        // Audio thread participates as a worker until the block is drained.
+        while (workers->tasks_remaining.load(std::memory_order_acquire) > 0) {
+            uint32_t t;
+            if (workers->queue.pop(t)) execute_instance_task(t);
+            else cpu_relax();
+        }
+        workers->block_active.store(false, std::memory_order_release);
+    }
+
+    // A single instance-task: gather inputs, process, release downstream.
+    void execute_instance_task(uint32_t slot) {
+        const size_t nf = parallel_nf;
+        graph_instance* g = mgr.slots[slot].inst.get();
+        gather_inputs(slot, g, nf);
+        g->process();
+        for (const auto& r : routes) {
+            if (r.to_master || r.src_slot != slot || !route_live(r)) continue;
+            if (dep[r.dst_slot].fetch_sub(1, std::memory_order_acq_rel) == 1)
+                workers->queue.push(r.dst_slot);
+        }
+        workers->tasks_remaining.fetch_sub(1, std::memory_order_acq_rel);
+    }
+
+    // Zero input terminals then sum all live incoming routes (deterministic order).
+    void gather_inputs(uint32_t slot, graph_instance* g, size_t nf) {
+        zero_input_terminals(g, nf);
+        for (const auto& r : routes) {
+            if (r.to_master || r.dst_slot != slot || !route_live(r)) continue;
+            if (auto* src = mgr.instance_at(r.src_slot))
+                sum_terminal_to_instance(src, r.src_terminal, g, r.dst_terminal, nf);
+        }
+    }
+
+    // ---- Command handling ----
+
     void drain_commands() {
         command_event cmd;
         while (command_queue.try_dequeue(cmd)) {
@@ -261,8 +299,7 @@ private:
         const instance_handle src = cmd.handle;
         routes.erase(std::remove_if(routes.begin(), routes.end(), [&](const active_route& r) {
             if (r.src_slot != src.slot || r.src_gen != src.generation) return false;
-            if (r.src_terminal != cmd.src_terminal) return false;
-            if (r.to_master != cmd.dest.to_master) return false;
+            if (r.src_terminal != cmd.src_terminal || r.to_master != cmd.dest.to_master) return false;
             if (!r.to_master)
                 return r.dst_slot == cmd.dest.instance.slot &&
                        r.dst_gen == cmd.dest.instance.generation &&
@@ -277,7 +314,6 @@ private:
         return r.dst_slot < active_gen.size() && active_gen[r.dst_slot] == r.dst_gen;
     }
 
-    // Topologically order active instances so producers run before consumers.
     void compute_order() {
         for (uint32_t slot : active_list) indeg_scratch[slot] = 0;
         for (const auto& r : routes)
@@ -294,13 +330,22 @@ private:
                 if (--indeg_scratch[r.dst_slot] == 0) order_scratch.push_back(r.dst_slot);
             }
         }
-
-        // Any remaining (cycle) appended in list order so nothing is starved.
-        if (order_scratch.size() < active_list.size()) {
+        if (order_scratch.size() < active_list.size())
             for (uint32_t slot : active_list)
                 if (indeg_scratch[slot] > 0) order_scratch.push_back(slot);
-        }
     }
+
+    void reap_pass(size_t nf) {
+        reap_scratch.clear();
+        for (uint32_t slot : active_list) {
+            instance_slot& s = mgr.slots[slot];
+            if (should_reap(s, s.inst.get(), terminal_peak(s.inst.get(), nf)))
+                reap_scratch.push_back(slot);
+        }
+        for (uint32_t slot : reap_scratch) release_slot(slot);
+    }
+
+    // ---- Buffer helpers ----
 
     void zero_input_terminals(graph_instance* g, size_t nf) {
         for (size_t t = 0; t < g->input_terminal_count(); ++t)
@@ -344,7 +389,6 @@ private:
         active_gen[slot] = 0;
         auto it = std::find(active_list.begin(), active_list.end(), slot);
         if (it != active_list.end()) active_list.erase(it);
-        // Purge routes touching this slot (as source or destination).
         routes.erase(std::remove_if(routes.begin(), routes.end(), [slot](const active_route& r) {
             return r.src_slot == slot || (!r.to_master && r.dst_slot == slot);
         }), routes.end());
