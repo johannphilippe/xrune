@@ -5,6 +5,7 @@
 #include "audio_backend.hpp"
 #include "rtaudio_backend.hpp"
 #include "worker_pool.hpp"
+#include "rt_check.hpp"
 #include <readerwriterqueue.h>
 #include <vector>
 #include <algorithm>
@@ -105,6 +106,11 @@ struct engine {
         dep = std::make_unique<std::atomic<int>[]>(max_instances);
         for (size_t i = 0; i < max_instances; ++i) dep[i].store(0, std::memory_order_relaxed);
 
+        // Pre-size the lock-free queues so the audio thread never grows them.
+        // Telemetry is produced on the AUDIO thread (reaps) -> try_enqueue only.
+        command_queue = moodycamel::ReaderWriterQueue<command_event>(max_instances * 8 + 64);
+        telemetry_queue = moodycamel::ReaderWriterQueue<telemetry_event>(max_instances * 4 + 16);
+
         master_buffers.resize(output_channels);
         for (auto& buf : master_buffers) buf.assign(block_size, 0.0);
 
@@ -166,6 +172,8 @@ struct engine {
     // ---- Audio thread ----
 
     int process(double* out_buf, const double* /*in_buf*/, unsigned int n_frames) {
+        enable_denormal_flush();          // FTZ/DAZ on the audio (callback) thread
+        rt::no_alloc_scope rt_guard;      // audio path must not allocate
         const size_t nf = std::min<size_t>(n_frames, block_size);
 
         drain_commands();
@@ -226,6 +234,7 @@ private:
 
     // A single instance-task: gather inputs, process, release downstream.
     void execute_instance_task(uint32_t slot) {
+        rt::no_alloc_scope rt_guard;   // also covers worker threads
         const size_t nf = parallel_nf;
         graph_instance* g = mgr.slots[slot].inst.get();
         gather_inputs(slot, g, nf);
@@ -284,6 +293,7 @@ private:
     void add_route(const command_event& cmd) {
         const instance_handle src = cmd.handle;
         if (src.slot >= active_gen.size() || active_gen[src.slot] != src.generation) return;
+        if (routes.size() >= routes.capacity()) return; // never realloc on the audio thread
         active_route r;
         r.src_slot = src.slot; r.src_gen = src.generation; r.src_terminal = cmd.src_terminal;
         r.to_master = cmd.dest.to_master;
@@ -392,7 +402,8 @@ private:
         routes.erase(std::remove_if(routes.begin(), routes.end(), [slot](const active_route& r) {
             return r.src_slot == slot || (!r.to_master && r.dst_slot == slot);
         }), routes.end());
-        telemetry_queue.enqueue({slot});
+        // Produced on the audio thread: try_enqueue never grows the queue.
+        telemetry_queue.try_enqueue({slot});
     }
 
     static bool should_reap(instance_slot& s, graph_instance* g, sample_t block_peak) {

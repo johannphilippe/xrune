@@ -57,10 +57,12 @@ struct worker_pool {
         while (running.load(std::memory_order_acquire)) {
             if (block_active.load(std::memory_order_acquire)) {
                 uint32_t t;
-                if (queue.pop(t)) execute(t);
+                if (queue.pop(t)) execute(t);   // in a block: spin tight for low latency
                 else cpu_relax();
             } else {
-                cpu_relax();
+                // Between blocks: yield instead of hot-spinning (workers are not
+                // on the audio thread, so relinquishing here is safe).
+                std::this_thread::yield();
             }
         }
     }

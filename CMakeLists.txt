@@ -81,3 +81,7 @@ add_test(NAME multirate COMMAND test_multirate)
 add_executable(test_parallel tests/test_parallel.cpp)
 target_link_libraries(test_parallel PRIVATE xrune_core)
 add_test(NAME parallel COMMAND test_parallel)
+
+add_executable(test_rt_safety tests/test_rt_safety.cpp)
+target_link_libraries(test_rt_safety PRIVATE xrune_core)
+add_test(NAME rt_safety COMMAND test_rt_safety)
