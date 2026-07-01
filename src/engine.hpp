@@ -1,290 +1,157 @@
 #pragma once
 #include "core.hpp"
-#include "graph.hpp"
-#include "worker_pool.hpp"
-#include <RtAudio.h>
+#include "instance.hpp"
+#include "audio_backend.hpp"
+#include "rtaudio_backend.hpp"
 #include <readerwriterqueue.h>
 #include <vector>
-#include <iostream>
 #include <algorithm>
 #include <memory>
 
 namespace xrune {
 
 enum class command_type {
-    register_graph,
-    unregister_graph,
+    register_instance,
+    unregister_instance,
     set_parameter
 };
 
 struct command_event {
     command_type type;
-    graph* target_graph = nullptr;
-    node* target_node = nullptr;
-    size_t parameter_index = 0;
+    graph_instance* target = nullptr;
+    size_t node_index = 0;       // which node within the instance
+    size_t parameter_index = 0;  // which parameter of that node
     sample_t parameter_value = 0.0;
 };
 
 struct telemetry_event {
-    graph* completed_graph = nullptr;
+    graph_instance* completed = nullptr;
 };
 
+// The audio host + instance summing bus. It owns no topology; it runs whatever
+// graph_instances are registered and sums their output terminals to the master.
+// (Handle-based addressing, lifetimes, and cross-instance routing arrive in
+// Phases 2-3; here commands still carry a raw instance pointer.)
 struct engine {
-    rt::audio::RtAudio dac;
     size_t sample_rate = 48000;
     size_t block_size = 128;
     size_t input_channels = 0;
     size_t output_channels = 2;
 
-    std::vector<graph*> active_graphs;
+    std::vector<graph_instance*> active;
     std::vector<std::vector<sample_t>> master_buffers;
-    std::vector<std::vector<sample_t>> input_buffers;
 
-    // Lock-free queues for control and telemetry
     moodycamel::ReaderWriterQueue<command_event> command_queue;
     moodycamel::ReaderWriterQueue<telemetry_event> telemetry_queue;
 
-    // Worker thread pool for parallel execution
-    std::unique_ptr<worker_pool> workers;
-    size_t num_worker_threads = 0;
+    std::unique_ptr<audio_backend> backend;
 
     engine() = default;
-    
-    ~engine() {
-        stop();
-    }
+    ~engine() { stop(); }
 
-    bool init(size_t sr = 48000, size_t bs = 128, size_t ins = 0, size_t outs = 2, 
-               size_t num_workers = 0) {
+    // Inject a backend (e.g. offline_backend) before init(); defaults to RtAudio.
+    void use_backend(std::unique_ptr<audio_backend> b) { backend = std::move(b); }
+
+    bool init(size_t sr = 48000, size_t bs = 128, size_t ins = 0, size_t outs = 2) {
         sample_rate = sr;
         block_size = bs;
         input_channels = ins;
         output_channels = outs;
-        num_worker_threads = num_workers;
 
-        // Pre-reserve active graphs to prevent allocations on the audio thread
-        active_graphs.clear();
-        active_graphs.reserve(128);
+        active.clear();
+        active.reserve(128);
 
         master_buffers.resize(output_channels);
-        for (auto& buf : master_buffers) {
-            buf.assign(block_size, 0.0);
-        }
+        for (auto& buf : master_buffers) buf.assign(block_size, 0.0);
 
-        input_buffers.resize(input_channels);
-        for (auto& buf : input_buffers) {
-            buf.assign(block_size, 0.0);
-        }
+        if (!backend) backend = std::make_unique<rtaudio_backend>();
 
-        rt::audio::RtAudio::StreamParameters out_params;
-        out_params.deviceId = dac.getDefaultOutputDevice();
-        out_params.nChannels = static_cast<unsigned int>(output_channels);
-        out_params.firstChannel = 0;
-
-        rt::audio::RtAudio::StreamParameters* in_params_ptr = nullptr;
-        rt::audio::RtAudio::StreamParameters in_params;
-        if (input_channels > 0) {
-            in_params.deviceId = dac.getDefaultInputDevice();
-            in_params.nChannels = static_cast<unsigned int>(input_channels);
-            in_params.firstChannel = 0;
-            in_params_ptr = &in_params;
-        }
-
-        unsigned int buffer_frames = static_cast<unsigned int>(block_size);
-        
-        rt::audio::RtAudio::StreamOptions options;
-        rt::audio::RtAudioErrorType err = dac.openStream(
-            &out_params, in_params_ptr, rt::audio::RTAUDIO_FLOAT64,
-            static_cast<unsigned int>(sample_rate), &buffer_frames,
-            &audio_callback, this, &options
-        );
-
-        if (err != rt::audio::RTAUDIO_NO_ERROR) {
-            std::cerr << "RtAudio error on openStream: " << dac.getErrorText() << std::endl;
-            return false;
-        }
-
-        return true;
+        backend_config cfg{sample_rate, block_size, input_channels, output_channels};
+        return backend->open(cfg, [this](double* out, const double* in, unsigned int n) {
+            this->process(out, in, n);
+        });
     }
 
-    bool start() {
-        if (!dac.isStreamOpen()) return false;
-        if (dac.isStreamRunning()) return true;
-        
-        // Start worker threads for parallel execution if not already running
-        if (num_worker_threads > 0 && !workers) {
-            workers = std::make_unique<worker_pool>(num_worker_threads);
-            workers->start();
-        }
-        
-        rt::audio::RtAudioErrorType err = dac.startStream();
-        if (err != rt::audio::RTAUDIO_NO_ERROR) {
-            std::cerr << "RtAudio error on startStream: " << dac.getErrorText() << std::endl;
-            return false;
-        }
-        return true;
-    }
+    bool start() { return backend ? backend->start() : false; }
 
     void stop() {
-        // Stop worker threads first
-        if (workers) {
-            workers->stop();
-            workers.reset();
-        }
-        
-        if (dac.isStreamRunning()) {
-            dac.stopStream();
-        }
-        if (dac.isStreamOpen()) {
-            dac.closeStream();
+        if (backend) {
+            backend->stop();
+            backend->close();
         }
     }
 
-    // Thread-safe, lock-free registration
-    void register_graph(graph* g) {
-        command_event cmd;
-        cmd.type = command_type::register_graph;
-        cmd.target_graph = g;
-        command_queue.enqueue(cmd);
+    void register_instance(graph_instance* g) {
+        command_queue.enqueue({command_type::register_instance, g, 0, 0, 0.0});
     }
 
-    // Thread-safe, lock-free unregistration
-    void unregister_graph(graph* g) {
-        command_event cmd;
-        cmd.type = command_type::unregister_graph;
-        cmd.target_graph = g;
-        command_queue.enqueue(cmd);
+    void unregister_instance(graph_instance* g) {
+        command_queue.enqueue({command_type::unregister_instance, g, 0, 0, 0.0});
     }
 
-    // Thread-safe, lock-free parameter updates
-    void set_parameter(node* n, size_t index, sample_t value) {
-        command_event cmd;
-        cmd.type = command_type::set_parameter;
-        cmd.target_node = n;
-        cmd.parameter_index = index;
-        cmd.parameter_value = value;
-        command_queue.enqueue(cmd);
+    void set_parameter(graph_instance* g, size_t node_index, size_t param, sample_t value) {
+        command_queue.enqueue({command_type::set_parameter, g, node_index, param, value});
     }
 
-    // Poll completed graphs for deletion on the main thread
-    bool dequeue_completed_graph(graph*& g) {
+    bool dequeue_completed(graph_instance*& g) {
         telemetry_event ev;
-        if (telemetry_queue.try_dequeue(ev)) {
-            g = ev.completed_graph;
-            return true;
-        }
+        if (telemetry_queue.try_dequeue(ev)) { g = ev.completed; return true; }
         return false;
     }
 
-    // Process callback (100% real-time safe)
-    int process(double* out_buf, const double* in_buf, unsigned int n_frames) {
-        // 1. Process all pending control commands
+    int process(double* out_buf, const double* /*in_buf*/, unsigned int n_frames) {
+        const size_t nf = std::min<size_t>(n_frames, block_size);
+
+        // 1. Drain control commands.
         command_event cmd;
         while (command_queue.try_dequeue(cmd)) {
-            if (cmd.type == command_type::register_graph) {
-                if (active_graphs.size() < active_graphs.capacity()) {
-                    active_graphs.push_back(cmd.target_graph);
+            switch (cmd.type) {
+                case command_type::register_instance:
+                    if (active.size() < active.capacity()) active.push_back(cmd.target);
+                    break;
+                case command_type::unregister_instance: {
+                    auto it = std::find(active.begin(), active.end(), cmd.target);
+                    if (it != active.end()) {
+                        active.erase(it);
+                        telemetry_queue.enqueue({cmd.target});
+                    }
+                    break;
                 }
-            } else if (cmd.type == command_type::unregister_graph) {
-                auto it = std::find(active_graphs.begin(), active_graphs.end(), cmd.target_graph);
-                if (it != active_graphs.end()) {
-                    active_graphs.erase(it);
-                    telemetry_queue.enqueue({cmd.target_graph});
-                }
-            } else if (cmd.type == command_type::set_parameter) {
-                if (cmd.target_node) {
-                    cmd.target_node->set_parameter(cmd.parameter_index, cmd.parameter_value);
-                }
+                case command_type::set_parameter:
+                    if (cmd.target)
+                        cmd.target->set_parameter(cmd.node_index, cmd.parameter_index,
+                                                  cmd.parameter_value);
+                    break;
             }
         }
 
-        // 2. Clear master output summing buffers
-        for (auto& buf : master_buffers) {
-            std::fill(buf.begin(), buf.end(), 0.0);
-        }
+        // 2. Clear master summing buffers.
+        for (auto& buf : master_buffers) std::fill(buf.begin(), buf.end(), 0.0);
 
-        // 3. Deinterleave inputs
-        if (in_buf && input_channels > 0) {
-            for (size_t i = 0; i < n_frames; ++i) {
-                for (size_t ch = 0; ch < input_channels; ++ch) {
-                    input_buffers[ch][i] = in_buf[i * input_channels + ch];
-                }
-            }
-        }
-
-        // 4. Process all active graphs and sum outputs
-        for (auto it = active_graphs.begin(); it != active_graphs.end(); ) {
-            graph* g = *it;
+        // 3. Process instances and sum their output terminals.
+        for (auto it = active.begin(); it != active.end(); ) {
+            graph_instance* g = *it;
             if (g->finished_flag) {
                 telemetry_queue.enqueue({g});
-                it = active_graphs.erase(it);
+                it = active.erase(it);
                 continue;
             }
-
-            if (g->input_node && input_channels > 0) {
-                size_t in_idx = g->node_to_index[g->input_node];
-                size_t chans = std::min(g->input_node->outputs_count(), input_channels);
-                for (size_t ch = 0; ch < chans; ++ch) {
-                    std::copy(input_buffers[ch].begin(), input_buffers[ch].end(),
-                              g->output_buffers[in_idx][ch].begin());
-                }
-            }
-
-            // Use parallel execution if available and graph supports it
-            if (workers && g->run_parallel && g->tasks.size() >= 4) {
-                g->process_block_parallel(n_frames, sample_rate, workers->get_ready_queue());
-                
-                // Wait for all tasks to complete by checking the ready queue
-                // This is a simple approach - we wait until all tasks have been processed
-                // In a more sophisticated implementation, we could use a completion counter
-                // For now, we'll do a simple busy-wait
-                bool all_done = false;
-                size_t wait_count = 0;
-                const size_t max_wait = 1000; // Prevent infinite loops
-                
-                // Wait for the ready queue to be empty and no active workers
-                while (!all_done && wait_count < max_wait) {
-                    all_done = workers->get_ready_queue().empty() && 
-                              workers->get_active_count() == 0;
-                    if (!all_done) {
-                        worker_pool::rt_yield();
-                        wait_count++;
-                    }
-                }
-            } else {
-                g->process_block(n_frames, sample_rate);
-            }
-
-            if (g->output_node) {
-                size_t out_idx = g->node_to_index[g->output_node];
-                size_t chans = std::min(g->output_node->outputs_count(), output_channels);
-                for (size_t ch = 0; ch < chans; ++ch) {
-                    for (size_t i = 0; i < n_frames; ++i) {
-                        master_buffers[ch][i] += g->output_buffers[out_idx][ch][i];
-                    }
-                }
+            g->process();
+            const size_t chans = std::min(g->output_channels(), output_channels);
+            for (size_t ch = 0; ch < chans; ++ch) {
+                audio_buffer_view v = g->output_view(ch);
+                for (size_t i = 0; i < nf; ++i) master_buffers[ch][i] += v[i];
             }
             ++it;
         }
 
-        // 5. Interleave output buffer
-        for (size_t i = 0; i < n_frames; ++i) {
-            for (size_t ch = 0; ch < output_channels; ++ch) {
-                out_buf[i * output_channels + ch] = master_buffers[ch][i];
-            }
-        }
+        // 4. Interleave to the device buffer.
+        for (size_t i = 0; i < n_frames; ++i)
+            for (size_t ch = 0; ch < output_channels; ++ch)
+                out_buf[i * output_channels + ch] =
+                    (i < nf) ? master_buffers[ch][i] : 0.0;
 
         return 0;
-    }
-
-    private:
-    static int audio_callback(void* output_buffer, void* input_buffer,
-                              unsigned int n_frames, double stream_time,
-                              rt::audio::RtAudioStreamStatus status, void* user_data) {
-        auto* self = static_cast<engine*>(user_data);
-        auto* out_buf = static_cast<double*>(output_buffer);
-        const auto* in_buf = static_cast<const double*>(input_buffer);
-        return self->process(out_buf, in_buf, n_frames);
     }
 };
 

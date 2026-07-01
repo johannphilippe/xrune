@@ -27,22 +27,27 @@ set(RTAUDIO_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(rtaudio readerwriterqueue)
 
-add_executable(xrune 
-    src/xrune.cpp
-    )
+# Shared configuration for all Xrune targets (header-only library for now).
+add_library(xrune_core INTERFACE)
+target_include_directories(xrune_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(xrune_core INTERFACE rtaudio readerwriterqueue)
+target_compile_features(xrune_core INTERFACE cxx_std_20)
 
-add_executable(xrune_parallel_demo 
-    src/xrune_parallel_demo.cpp
-    )
+# --- Executables / demos ---
+add_executable(xrune src/xrune.cpp)
+target_link_libraries(xrune PRIVATE xrune_core)
 
-target_include_directories(xrune 
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
+# --- Tests (CTest, headless via offline backend) ---
+enable_testing()
 
-target_include_directories(xrune_parallel_demo 
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
+add_executable(test_arena tests/test_arena.cpp)
+target_link_libraries(test_arena PRIVATE xrune_core)
+add_test(NAME arena COMMAND test_arena)
 
-# Link against the fetched libraries
-target_link_libraries(xrune PRIVATE rtaudio readerwriterqueue)
-target_link_libraries(xrune_parallel_demo PRIVATE rtaudio readerwriterqueue)
+add_executable(test_offline tests/test_offline.cpp)
+target_link_libraries(test_offline PRIVATE xrune_core)
+add_test(NAME offline COMMAND test_offline)
+
+add_executable(test_instance tests/test_instance.cpp)
+target_link_libraries(test_instance PRIVATE xrune_core)
+add_test(NAME instance COMMAND test_instance)
