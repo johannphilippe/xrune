@@ -5,8 +5,15 @@
 #include "arena.hpp"
 #include <memory>
 #include <new>
+#include <algorithm>
 
 namespace xrune {
+
+// Per-instance, per-control-port smoothing state (control-rate ports only).
+struct port_control {
+    sample_t current = 0.0; // value at the start of the current block
+    sample_t target = 0.0;  // value being ramped toward
+};
 
 // A live realization of a blueprint (pre_roadmap §2). Owns an arena holding this
 // voice's node-state blocks, output buffers, and the precomputed processing
@@ -21,6 +28,8 @@ struct graph_instance {
     sample_t* silent = nullptr;                // block_size of zeros (read-only)
     audio_buffer_view* views = nullptr;        // flattened per-node in/out views
     node_processing_context* contexts = nullptr;
+    port_control* controls = nullptr;          // per control port (total_params)
+    param_view* param_views = nullptr;         // flattened per-node control ports
 
     size_t block_size = 0;
     size_t sample_rate = 48000;
@@ -45,6 +54,8 @@ struct graph_instance {
         bytes += block_size * sizeof(sample_t) + 64;
         bytes += total_views * sizeof(audio_buffer_view) + 64;
         bytes += n * sizeof(node_processing_context) + 64;
+        bytes += s.total_params * sizeof(port_control) + 64;
+        bytes += s.total_params * sizeof(param_view) + 64;
         bytes += 256;
         arena.reserve(bytes);
 
@@ -55,9 +66,12 @@ struct graph_instance {
         silent = arena.allocate_array<sample_t>(block_size);
         views = arena.allocate_array<audio_buffer_view>(total_views);
         contexts = arena.allocate_array<node_processing_context>(n);
+        controls = s.total_params ? arena.allocate_array<port_control>(s.total_params) : nullptr;
+        param_views = s.total_params ? arena.allocate_array<param_view>(s.total_params) : nullptr;
 
         if ((s.total_state_bytes && !state_region) || !silent || !contexts ||
-            (s.total_output_slots && !buffer_pool) || (total_views && !views))
+            (s.total_output_slots && !buffer_pool) || (total_views && !views) ||
+            (s.total_params && (!controls || !param_views)))
             return false;
 
         for (size_t i = 0; i < s.total_output_slots * block_size; ++i) buffer_pool[i] = 0.0;
@@ -89,11 +103,31 @@ struct graph_instance {
                 in_views[ch] = audio_buffer_view(ptr, block_size);
             }
 
+            // Control ports: initialize control state to defaults and bind each
+            // port to its source buffer (audio-rate) or leave it control-rate.
+            const size_t pc = nd->params_count();
+            const size_t pbase = s.param_base[i];
+            for (size_t pi = 0; pi < pc; ++pi) {
+                const sample_t def = nd->param_default(pi);
+                controls[pbase + pi] = port_control{def, def};
+                param_view& pv = param_views[pbase + pi];
+                const long src = s.param_source[i][pi];
+                if (src == SILENT_SLOT) {
+                    pv.buffer = nullptr;
+                    pv.base = def;
+                    pv.inc = 0.0;
+                } else {
+                    pv.buffer = buffer_pool + static_cast<size_t>(src) * block_size;
+                }
+            }
+
             auto* ctx = new (&contexts[i]) node_processing_context();
             ctx->inputs = in_views;
             ctx->input_count = ic;
             ctx->outputs = out_views;
             ctx->output_count = oc;
+            ctx->params = param_views + pbase;
+            ctx->param_count = pc;
             ctx->sample_rate = sample_rate;
             ctx->block_size = block_size;
         }
@@ -108,12 +142,37 @@ struct graph_instance {
 
     // Single-threaded block execution in topological order.
     void process() {
-        for (size_t idx : sched->topo_order)
+        for (size_t idx : sched->topo_order) {
+            update_control_ramps(idx);
             sched->bp->nodes[idx]->process(state_ptr(idx), contexts[idx]);
+        }
     }
 
+    // Refresh a node's control-rate ports: build a click-free linear ramp from
+    // last block's value to the target, then advance. Audio-rate ports (bound to
+    // a source buffer) are untouched.
+    void update_control_ramps(size_t node_index) {
+        const size_t pc = sched->bp->nodes[node_index]->params_count();
+        const size_t pbase = sched->param_base[node_index];
+        const sample_t inv_bs = block_size ? (1.0 / static_cast<sample_t>(block_size)) : 0.0;
+        for (size_t pi = 0; pi < pc; ++pi) {
+            param_view& pv = param_views[pbase + pi];
+            if (pv.buffer) continue; // audio-rate
+            port_control& c = controls[pbase + pi];
+            pv.base = c.current;
+            pv.inc = (c.target - c.current) * inv_bs;
+            c.current = c.target;
+        }
+    }
+
+    // Set a control port's target (control thread / command). Clamped to range;
+    // the value ramps in over the next block. No-op for audio-rate-driven ports.
     void set_parameter(size_t node_index, size_t param, sample_t value) {
-        sched->bp->nodes[node_index]->set_parameter(state_ptr(node_index), param, value);
+        const node* nd = sched->bp->nodes[node_index].get();
+        if (param >= nd->params_count()) return;
+        const port_descriptor* pd = nd->params();
+        if (pd) value = std::clamp(value, pd[param].min_value, pd[param].max_value);
+        controls[sched->param_base[node_index] + param].target = value;
     }
 
     size_t output_channels() const {

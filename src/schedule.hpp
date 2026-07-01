@@ -28,6 +28,12 @@ struct compiled_schedule {
 
     // per node -> per input channel: source output slot, or SILENT_SLOT.
     std::vector<std::vector<long>> input_source;
+
+    // Control ports (Phase 4).
+    std::vector<size_t> param_base;       // per node: first index into the flat param arrays
+    size_t total_params = 0;
+    // per node -> per control port: source output slot (audio-rate) or SILENT_SLOT (control-rate).
+    std::vector<std::vector<long>> param_source;
 };
 
 inline compiled_schedule compile(const graph_blueprint& bp, size_t block_size) {
@@ -37,9 +43,15 @@ inline compiled_schedule compile(const graph_blueprint& bp, size_t block_size) {
     const size_t n = bp.size();
 
     // --- Kahn topological sort with cycle detection ---
+    // Both audio connections and param (modulation) connections create
+    // producer->consumer dependencies.
     std::vector<size_t> in_degree(n, 0);
     std::vector<std::vector<size_t>> adj(n);
     for (const auto& c : bp.connections) {
+        adj[c.src_node].push_back(c.dst_node);
+        in_degree[c.dst_node]++;
+    }
+    for (const auto& c : bp.param_connections) {
         adj[c.src_node].push_back(c.dst_node);
         in_degree[c.dst_node]++;
     }
@@ -88,6 +100,22 @@ inline compiled_schedule compile(const graph_blueprint& bp, size_t block_size) {
     }
     for (const auto& c : bp.connections) {
         s.input_source[c.dst_node][c.dst_input] =
+            static_cast<long>(s.output_slot_base[c.src_node] + c.src_output);
+    }
+
+    // --- Control-port layout + modulation wiring ---
+    s.param_base.resize(n);
+    s.param_source.resize(n);
+    size_t p = 0;
+    for (size_t i = 0; i < n; ++i) {
+        s.param_base[i] = p;
+        const size_t pc = bp.nodes[i]->params_count();
+        s.param_source[i].assign(pc, SILENT_SLOT);
+        p += pc;
+    }
+    s.total_params = p;
+    for (const auto& c : bp.param_connections) {
+        s.param_source[c.dst_node][c.dst_param] =
             static_cast<long>(s.output_slot_base[c.src_node] + c.src_output);
     }
 

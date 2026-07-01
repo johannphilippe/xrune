@@ -9,10 +9,11 @@ namespace xrune {
 constexpr sample_t PI = 3.14159265358979323846;
 
 // ============================================================================
-// OSCILLATOR  (state: frequency, phase; param 0 = frequency)
+// OSCILLATOR  (port: freq; state: phase). freq is modulatable (FM/vibrato).
 // ============================================================================
 struct oscillator : node {
-    struct st { sample_t frequency; sample_t phase; };
+    struct st { sample_t phase; };
+    static constexpr port_descriptor PORTS[] = {{"freq", 440.0, 0.0, 20000.0}};
     sample_t default_freq = 440.0;
 
     oscillator() = default;
@@ -20,35 +21,31 @@ struct oscillator : node {
 
     size_t inputs_count() const override { return 0; }
     size_t outputs_count() const override { return 1; }
+    size_t params_count() const override { return 1; }
+    const port_descriptor* params() const override { return PORTS; }
+    sample_t param_default(size_t i) const override { return i == 0 ? default_freq : 0.0; }
     size_t state_size() const override { return sizeof(st); }
     size_t state_align() const override { return alignof(st); }
 
-    void init_state(void* s) const override {
-        auto* x = static_cast<st*>(s);
-        x->frequency = default_freq;
-        x->phase = 0.0;
-    }
+    void init_state(void* s) const override { static_cast<st*>(s)->phase = 0.0; }
 
     void process(void* s, const node_processing_context& ctx) const override {
         auto* x = static_cast<st*>(s);
-        const sample_t inc = 2.0 * PI * x->frequency / static_cast<sample_t>(ctx.sample_rate);
+        const sample_t k = 2.0 * PI / static_cast<sample_t>(ctx.sample_rate);
         for (size_t i = 0; i < ctx.block_size; ++i) {
             ctx.outputs[0][i] = std::sin(x->phase);
-            x->phase += inc;
+            x->phase += k * ctx.params[0].at(i);
             if (x->phase >= 2.0 * PI) x->phase -= 2.0 * PI;
+            else if (x->phase < 0.0) x->phase += 2.0 * PI;
         }
-    }
-
-    void set_parameter(void* s, size_t index, sample_t value) const override {
-        if (index == 0) static_cast<st*>(s)->frequency = value;
     }
 };
 
 // ============================================================================
-// GAIN  (state: value; param 0 = value)
+// GAIN  (port: gain; stateless)
 // ============================================================================
 struct gain : node {
-    struct st { sample_t value; };
+    static constexpr port_descriptor PORTS[] = {{"gain", 1.0, -1e30, 1e30}};
     sample_t default_value = 1.0;
 
     gain() = default;
@@ -56,34 +53,25 @@ struct gain : node {
 
     size_t inputs_count() const override { return 1; }
     size_t outputs_count() const override { return 1; }
-    size_t state_size() const override { return sizeof(st); }
-    size_t state_align() const override { return alignof(st); }
+    size_t params_count() const override { return 1; }
+    const port_descriptor* params() const override { return PORTS; }
+    sample_t param_default(size_t i) const override { return i == 0 ? default_value : 1.0; }
 
-    void init_state(void* s) const override { static_cast<st*>(s)->value = default_value; }
-
-    void process(void* s, const node_processing_context& ctx) const override {
-        const sample_t v = static_cast<st*>(s)->value;
+    void process(void*, const node_processing_context& ctx) const override {
         for (size_t i = 0; i < ctx.block_size; ++i)
-            ctx.outputs[0][i] = ctx.inputs[0][i] * v;
-    }
-
-    void set_parameter(void* s, size_t index, sample_t value) const override {
-        if (index == 0) static_cast<st*>(s)->value = value;
+            ctx.outputs[0][i] = ctx.inputs[0][i] * ctx.params[0].at(i);
     }
 };
 
 // ============================================================================
-// MIXER  (stateless: sums all inputs to one output)
+// MIXER / STEREO MIXER  (stateless; no ports)
 // ============================================================================
 struct mixer : node {
     size_t in_count = 2;
-
     mixer() = default;
     explicit mixer(size_t ins) : in_count(ins) {}
-
     size_t inputs_count() const override { return in_count; }
     size_t outputs_count() const override { return 1; }
-
     void process(void*, const node_processing_context& ctx) const override {
         for (size_t i = 0; i < ctx.block_size; ++i) {
             sample_t sum = 0.0;
@@ -93,18 +81,12 @@ struct mixer : node {
     }
 };
 
-// ============================================================================
-// STEREO MIXER  (stateless: sums N stereo pairs to one stereo output)
-// ============================================================================
 struct stereo_mixer : node {
     size_t in_count = 2; // number of stereo pairs
-
     stereo_mixer() = default;
     explicit stereo_mixer(size_t ins) : in_count(ins) {}
-
     size_t inputs_count() const override { return in_count * 2; }
     size_t outputs_count() const override { return 2; }
-
     void process(void*, const node_processing_context& ctx) const override {
         for (size_t i = 0; i < ctx.block_size; ++i) {
             sample_t l = 0.0, r = 0.0;
@@ -119,10 +101,10 @@ struct stereo_mixer : node {
 };
 
 // ============================================================================
-// STEREO FADER  (state: volume; param 0 = volume)
+// STEREO FADER  (port: volume; stateless)
 // ============================================================================
 struct stereo_fader : node {
-    struct st { sample_t volume; };
+    static constexpr port_descriptor PORTS[] = {{"volume", 1.0, 0.0, 1e30}};
     sample_t default_volume = 1.0;
 
     stereo_fader() = default;
@@ -130,73 +112,21 @@ struct stereo_fader : node {
 
     size_t inputs_count() const override { return 2; }
     size_t outputs_count() const override { return 2; }
-    size_t state_size() const override { return sizeof(st); }
-    size_t state_align() const override { return alignof(st); }
-
-    void init_state(void* s) const override { static_cast<st*>(s)->volume = default_volume; }
-
-    void process(void* s, const node_processing_context& ctx) const override {
-        const sample_t v = static_cast<st*>(s)->volume;
-        for (size_t ch = 0; ch < 2; ++ch)
-            for (size_t i = 0; i < ctx.block_size; ++i)
-                ctx.outputs[ch][i] = ctx.inputs[ch][i] * v;
-    }
-
-    void set_parameter(void* s, size_t index, sample_t value) const override {
-        if (index == 0) static_cast<st*>(s)->volume = value;
-    }
-};
-
-// ============================================================================
-// CHANNEL ADAPTER  (stateless: merge/split channels; writes full output block)
-// ============================================================================
-struct channel_adapter : node {
-    size_t num_inputs;
-    size_t num_outputs;
-
-    channel_adapter(size_t inputs = 1, size_t outputs = 1)
-        : num_inputs(inputs), num_outputs(outputs) {}
-
-    size_t inputs_count() const override { return num_inputs; }
-    size_t outputs_count() const override { return num_outputs; }
+    size_t params_count() const override { return 1; }
+    const port_descriptor* params() const override { return PORTS; }
+    sample_t param_default(size_t i) const override { return i == 0 ? default_volume : 1.0; }
 
     void process(void*, const node_processing_context& ctx) const override {
-        if (num_outputs == 1) { // sum all inputs
-            for (size_t i = 0; i < ctx.block_size; ++i) {
-                sample_t sum = 0.0;
-                for (size_t ch = 0; ch < num_inputs; ++ch) sum += ctx.inputs[ch][i];
-                ctx.outputs[0][i] = sum;
-            }
-        } else if (num_inputs == 1) { // fan out
-            for (size_t ch = 0; ch < num_outputs; ++ch)
-                for (size_t i = 0; i < ctx.block_size; ++i)
-                    ctx.outputs[ch][i] = ctx.inputs[0][i];
-        } else if (num_inputs > num_outputs && (num_inputs % num_outputs) == 0) { // merge
-            for (size_t o = 0; o < num_outputs; ++o)
-                for (size_t s = 0; s < ctx.block_size; ++s) {
-                    sample_t sum = 0.0;
-                    for (size_t i = o; i < num_inputs; i += num_outputs) sum += ctx.inputs[i][s];
-                    ctx.outputs[o][s] = sum;
-                }
-        } else if (num_outputs > num_inputs && (num_outputs % num_inputs) == 0) { // split
-            for (size_t o = 0; o < num_outputs; ++o) {
-                size_t i = o % num_inputs;
-                for (size_t s = 0; s < ctx.block_size; ++s) ctx.outputs[o][s] = ctx.inputs[i][s];
-            }
-        } else { // fallback: copy first input to all outputs
-            for (size_t o = 0; o < num_outputs; ++o) {
-                size_t i = std::min(o, num_inputs - 1);
-                for (size_t s = 0; s < ctx.block_size; ++s) ctx.outputs[o][s] = ctx.inputs[i][s];
-            }
+        for (size_t i = 0; i < ctx.block_size; ++i) {
+            const sample_t v = ctx.params[0].at(i);
+            ctx.outputs[0][i] = ctx.inputs[0][i] * v;
+            ctx.outputs[1][i] = ctx.inputs[1][i] * v;
         }
     }
 };
 
 // ============================================================================
-// BUS INPUT  (stateless: entry point for an instance input terminal)
-// Has no graph inputs; its output buffers are filled by the engine from routed
-// upstream instances before the instance is processed, so process() is a no-op
-// that simply preserves that externally-written signal for downstream nodes.
+// BUS INPUT  (stateless; no ports) - engine fills its outputs from routes.
 // ============================================================================
 struct bus_input : node {
     size_t n;
@@ -207,7 +137,48 @@ struct bus_input : node {
 };
 
 // ============================================================================
-// MONO->STEREO / STEREO->MONO  (stateless)
+// CHANNEL ADAPTER  (stateless; no ports)
+// ============================================================================
+struct channel_adapter : node {
+    size_t num_inputs;
+    size_t num_outputs;
+    channel_adapter(size_t inputs = 1, size_t outputs = 1)
+        : num_inputs(inputs), num_outputs(outputs) {}
+    size_t inputs_count() const override { return num_inputs; }
+    size_t outputs_count() const override { return num_outputs; }
+    void process(void*, const node_processing_context& ctx) const override {
+        if (num_outputs == 1) {
+            for (size_t i = 0; i < ctx.block_size; ++i) {
+                sample_t sum = 0.0;
+                for (size_t ch = 0; ch < num_inputs; ++ch) sum += ctx.inputs[ch][i];
+                ctx.outputs[0][i] = sum;
+            }
+        } else if (num_inputs == 1) {
+            for (size_t ch = 0; ch < num_outputs; ++ch)
+                for (size_t i = 0; i < ctx.block_size; ++i) ctx.outputs[ch][i] = ctx.inputs[0][i];
+        } else if (num_inputs > num_outputs && (num_inputs % num_outputs) == 0) {
+            for (size_t o = 0; o < num_outputs; ++o)
+                for (size_t s = 0; s < ctx.block_size; ++s) {
+                    sample_t sum = 0.0;
+                    for (size_t i = o; i < num_inputs; i += num_outputs) sum += ctx.inputs[i][s];
+                    ctx.outputs[o][s] = sum;
+                }
+        } else if (num_outputs > num_inputs && (num_outputs % num_inputs) == 0) {
+            for (size_t o = 0; o < num_outputs; ++o) {
+                size_t i = o % num_inputs;
+                for (size_t s = 0; s < ctx.block_size; ++s) ctx.outputs[o][s] = ctx.inputs[i][s];
+            }
+        } else {
+            for (size_t o = 0; o < num_outputs; ++o) {
+                size_t i = std::min(o, num_inputs - 1);
+                for (size_t s = 0; s < ctx.block_size; ++s) ctx.outputs[o][s] = ctx.inputs[i][s];
+            }
+        }
+    }
+};
+
+// ============================================================================
+// MONO<->STEREO  (stateless; no ports)
 // ============================================================================
 struct mono_to_stereo : node {
     size_t inputs_count() const override { return 1; }
@@ -231,10 +202,10 @@ struct stereo_to_mono : node {
 };
 
 // ============================================================================
-// PAN  (state: pan position; param 0 = pan in [-1, 1])
+// PAN  (port: pan in [-1,1]; stateless). Equal-power; pan is modulatable.
 // ============================================================================
 struct pan : node {
-    struct st { sample_t pos; };
+    static constexpr port_descriptor PORTS[] = {{"pan", 0.0, -1.0, 1.0}};
     sample_t default_pos = 0.0;
 
     pan() = default;
@@ -242,29 +213,23 @@ struct pan : node {
 
     size_t inputs_count() const override { return 1; }
     size_t outputs_count() const override { return 2; }
-    size_t state_size() const override { return sizeof(st); }
-    size_t state_align() const override { return alignof(st); }
+    size_t params_count() const override { return 1; }
+    const port_descriptor* params() const override { return PORTS; }
+    sample_t param_default(size_t i) const override { return i == 0 ? default_pos : 0.0; }
 
-    void init_state(void* s) const override { static_cast<st*>(s)->pos = default_pos; }
-
-    void process(void* s, const node_processing_context& ctx) const override {
-        const sample_t p = std::clamp(static_cast<st*>(s)->pos, -1.0, 1.0);
-        const sample_t angle = p * PI * 0.25;
-        const sample_t lg = std::cos(angle), rg = std::sin(angle);
+    void process(void*, const node_processing_context& ctx) const override {
         for (size_t i = 0; i < ctx.block_size; ++i) {
-            sample_t in = ctx.inputs[0][i];
-            ctx.outputs[0][i] = in * lg;
-            ctx.outputs[1][i] = in * rg;
+            const sample_t p = std::clamp(ctx.params[0].at(i), -1.0, 1.0);
+            const sample_t angle = p * PI * 0.25;
+            const sample_t in = ctx.inputs[0][i];
+            ctx.outputs[0][i] = in * std::cos(angle);
+            ctx.outputs[1][i] = in * std::sin(angle);
         }
-    }
-
-    void set_parameter(void* s, size_t index, sample_t value) const override {
-        if (index == 0) static_cast<st*>(s)->pos = value;
     }
 };
 
 // ============================================================================
-// INVERTER / STEREO INVERTER / ADD / MULTIPLY  (stateless)
+// INVERTER / STEREO INVERTER / ADD / MULTIPLY  (stateless; no ports)
 // ============================================================================
 struct inverter : node {
     size_t inputs_count() const override { return 1; }
@@ -302,10 +267,11 @@ struct multiply : node {
 };
 
 // ============================================================================
-// CONSTANT  (state: value; param 0 = value)
+// CONSTANT  (port: value; stateless). A trivial control source: its output IS
+// its (modulatable) port value.
 // ============================================================================
 struct constant : node {
-    struct st { sample_t value; };
+    static constexpr port_descriptor PORTS[] = {{"value", 1.0, -1e30, 1e30}};
     sample_t default_value = 1.0;
 
     constant() = default;
@@ -313,23 +279,17 @@ struct constant : node {
 
     size_t inputs_count() const override { return 0; }
     size_t outputs_count() const override { return 1; }
-    size_t state_size() const override { return sizeof(st); }
-    size_t state_align() const override { return alignof(st); }
+    size_t params_count() const override { return 1; }
+    const port_descriptor* params() const override { return PORTS; }
+    sample_t param_default(size_t i) const override { return i == 0 ? default_value : 0.0; }
 
-    void init_state(void* s) const override { static_cast<st*>(s)->value = default_value; }
-
-    void process(void* s, const node_processing_context& ctx) const override {
-        const sample_t v = static_cast<st*>(s)->value;
-        for (size_t i = 0; i < ctx.block_size; ++i) ctx.outputs[0][i] = v;
-    }
-
-    void set_parameter(void* s, size_t index, sample_t value) const override {
-        if (index == 0) static_cast<st*>(s)->value = value;
+    void process(void*, const node_processing_context& ctx) const override {
+        for (size_t i = 0; i < ctx.block_size; ++i) ctx.outputs[0][i] = ctx.params[0].at(i);
     }
 };
 
 // ============================================================================
-// WHITE NOISE  (state: xorshift64* seed)
+// WHITE NOISE  (state: xorshift64* seed; no ports; seed is blueprint config)
 // ============================================================================
 struct white_noise : node {
     struct st { uint64_t seed; };
@@ -352,7 +312,6 @@ struct white_noise : node {
             seed ^= seed << 25;
             seed ^= seed >> 27;
             uint64_t r = seed * 0x2545F4914F6CDD1DULL;
-            // Use the top 53 bits for an unbiased double in [0, 1).
             sample_t val = static_cast<sample_t>(r >> 11) * (1.0 / 9007199254740992.0);
             ctx.outputs[0][i] = val * 2.0 - 1.0;
         }
@@ -361,10 +320,11 @@ struct white_noise : node {
 };
 
 // ============================================================================
-// SAMPLE AND HOLD  (state: rate/held/counter; param 0 = rate in Hz)
+// SAMPLE AND HOLD  (port: rate Hz; state: held/counter). rate read per block.
 // ============================================================================
 struct sample_and_hold : node {
-    struct st { sample_t rate_hz; sample_t held; size_t counter; };
+    struct st { sample_t held; size_t counter; };
+    static constexpr port_descriptor PORTS[] = {{"rate", 1.0, -1e30, 1e30}};
     sample_t default_rate = 1.0;
 
     sample_and_hold() = default;
@@ -372,32 +332,32 @@ struct sample_and_hold : node {
 
     size_t inputs_count() const override { return 1; }
     size_t outputs_count() const override { return 1; }
+    size_t params_count() const override { return 1; }
+    const port_descriptor* params() const override { return PORTS; }
+    sample_t param_default(size_t i) const override { return i == 0 ? default_rate : 1.0; }
     size_t state_size() const override { return sizeof(st); }
     size_t state_align() const override { return alignof(st); }
 
     void init_state(void* s) const override {
         auto* x = static_cast<st*>(s);
-        x->rate_hz = default_rate; x->held = 0.0; x->counter = 0;
+        x->held = 0.0; x->counter = 0;
     }
 
     void process(void* s, const node_processing_context& ctx) const override {
         auto* x = static_cast<st*>(s);
-        if (x->rate_hz <= 0.0) {
-            if (x->rate_hz < 0.0 && ctx.block_size > 0) x->held = ctx.inputs[0][0];
+        const sample_t rate = ctx.params[0].first();
+        if (rate <= 0.0) {
+            if (rate < 0.0 && ctx.block_size > 0) x->held = ctx.inputs[0][0];
             for (size_t i = 0; i < ctx.block_size; ++i) ctx.outputs[0][i] = x->held;
             return;
         }
-        size_t interval = static_cast<size_t>(static_cast<sample_t>(ctx.sample_rate) / x->rate_hz);
+        size_t interval = static_cast<size_t>(static_cast<sample_t>(ctx.sample_rate) / rate);
         if (interval == 0) interval = 1;
         for (size_t i = 0; i < ctx.block_size; ++i) {
             if (x->counter >= interval) { x->held = ctx.inputs[0][i]; x->counter = 0; }
             ctx.outputs[0][i] = x->held;
             ++x->counter;
         }
-    }
-
-    void set_parameter(void* s, size_t index, sample_t value) const override {
-        if (index == 0) static_cast<st*>(s)->rate_hz = value;
     }
 };
 

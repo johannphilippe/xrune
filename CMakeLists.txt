@@ -59,3 +59,7 @@ add_test(NAME lifetime COMMAND test_lifetime)
 add_executable(test_routing tests/test_routing.cpp)
 target_link_libraries(test_routing PRIVATE xrune_core)
 add_test(NAME routing COMMAND test_routing)
+
+add_executable(test_ports tests/test_ports.cpp)
+target_link_libraries(test_ports PRIVATE xrune_core)
+add_test(NAME ports COMMAND test_ports)
