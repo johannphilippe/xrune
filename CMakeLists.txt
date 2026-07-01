@@ -51,3 +51,7 @@ add_test(NAME offline COMMAND test_offline)
 add_executable(test_instance tests/test_instance.cpp)
 target_link_libraries(test_instance PRIVATE xrune_core)
 add_test(NAME instance COMMAND test_instance)
+
+add_executable(test_lifetime tests/test_lifetime.cpp)
+target_link_libraries(test_lifetime PRIVATE xrune_core)
+add_test(NAME lifetime COMMAND test_lifetime)

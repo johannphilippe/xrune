@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <utility>
+#include <string>
 
 namespace xrune {
 
@@ -18,6 +19,7 @@ struct blueprint_connection {
 // Nodes are referenced by index returned from add().
 struct graph_blueprint {
     std::vector<std::unique_ptr<node>> nodes;
+    std::vector<std::string> names;   // optional, parallel to nodes ("" = unnamed)
     std::vector<blueprint_connection> connections;
     long input_node = -1;
     long output_node = -1;
@@ -25,7 +27,24 @@ struct graph_blueprint {
     template <typename T, typename... Args>
     size_t add(Args&&... args) {
         nodes.push_back(std::make_unique<T>(std::forward<Args>(args)...));
+        names.emplace_back();
         return nodes.size() - 1;
+    }
+
+    // Named variant: lets control code / Idyl address the node by name, resolved
+    // to an index at compile time (audio thread only ever uses the index).
+    template <typename T, typename... Args>
+    size_t add_named(const std::string& name, Args&&... args) {
+        size_t idx = add<T>(std::forward<Args>(args)...);
+        names[idx] = name;
+        return idx;
+    }
+
+    // Returns the node index for a name, or -1 if not found.
+    long find_node(const std::string& name) const {
+        for (size_t i = 0; i < names.size(); ++i)
+            if (names[i] == name) return static_cast<long>(i);
+        return -1;
     }
 
     // Connect src.output -> dst.input. Rejects out-of-range ports, and enforces

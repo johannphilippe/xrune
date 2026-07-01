@@ -41,9 +41,8 @@ int main() {
         eng.use_backend(std::move(ob));
         XR_CHECK(eng.init(sr, bs, 0, 2));
 
-        auto v = instantiate(sched, sr);
-        XR_CHECK(v != nullptr);
-        eng.register_instance(v.get());
+        instance_handle h = eng.spawn(sched);
+        XR_CHECK(h.valid());
 
         obp->render(blocks);
         XR_CHECK_NEAR(obp->rms(0), SINE_RMS * 0.25, 0.005);
@@ -64,10 +63,8 @@ int main() {
         eng.use_backend(std::move(ob));
         XR_CHECK(eng.init(sr, bs, 0, 2));
 
-        auto a = instantiate(sched, sr);
-        auto b = instantiate(sched, sr);
-        eng.register_instance(a.get());
-        eng.register_instance(b.get());
+        eng.spawn(sched);
+        eng.spawn(sched);
 
         obp->render(blocks);
         XR_CHECK_NEAR(obp->rms(0), SINE_RMS * 0.5, 0.005); // in-phase -> doubles

@@ -31,21 +31,26 @@ int main() {
     engine eng;
     if (!eng.init(sr, bs, 0, 2)) { std::cerr << "Engine init failed!\n"; return 1; }
 
-    // Two independent voices from the same blueprint.
-    auto v1 = instantiate(sched, sr);
-    auto v2 = instantiate(sched, sr);
-    if (!v1 || !v2) { std::cerr << "Instantiation failed!\n"; return 1; }
-    eng.register_instance(v1.get());
-    eng.register_instance(v2.get());
+    // Two independent voices spawned from the same blueprint (handle-addressed).
+    instance_handle v1 = eng.spawn(sched);
+    instance_handle v2 = eng.spawn(sched);
+    if (!v1.valid() || !v2.valid()) { std::cerr << "Spawn failed!\n"; return 1; }
 
     if (!eng.start()) { std::cerr << "Failed to start audio!\n"; return 1; }
 
     std::cout << "Two voices, both 440 Hz...\n";
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    std::cout << "Detuning voice 2 -> 330 Hz (lock-free, per-instance state)...\n";
-    eng.set_parameter(v2.get(), osc, 0, 330.0);
+    std::cout << "Detuning voice 2 -> 330 Hz (lock-free, handle-addressed)...\n";
+    eng.set_parameter(v2, osc, 0, 330.0);
     std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    std::cout << "Killing voice 1; spawning a timed voice (0.5s)...\n";
+    eng.kill(v1);
+    lifetime_policy timed{lifetime_kind::timed, static_cast<size_t>(0.5 * sr / bs), 1e-5, 0};
+    eng.spawn(sched, timed);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    eng.reclaim();
 
     eng.stop();
     std::cout << "Done.\n";
