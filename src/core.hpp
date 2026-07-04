@@ -100,6 +100,16 @@ struct node {
     virtual size_t state_align() const { return alignof(sample_t); }
     virtual void init_state(void* state) const { (void)state; }
 
+    // Rate-aware setup, called on the control thread at spawn *after* init_state.
+    // Nodes hosting a stateful sub-engine (Faust, Csound) that must be created
+    // with the sample rate / block size do it here. Default: nothing.
+    virtual void setup_state(void* state, size_t sample_rate, size_t block_size) const {
+        (void)state; (void)sample_rate; (void)block_size;
+    }
+    // Teardown, called on the control thread when the instance is destroyed.
+    // Release anything setup_state acquired (e.g. a hosted dsp instance).
+    virtual void destroy_state(void* state) const { (void)state; }
+
     virtual void process(void* state, const node_processing_context& ctx) const = 0;
 };
 

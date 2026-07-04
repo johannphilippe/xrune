@@ -36,6 +36,21 @@ struct graph_instance {
     size_t sample_rate = 48000;            // base sample rate
     bool finished_flag = false;
 
+    graph_instance() = default;
+    ~graph_instance() { teardown(); }
+    graph_instance(const graph_instance&) = delete;
+    graph_instance& operator=(const graph_instance&) = delete;
+
+    // Release per-node hosted state (Faust/Csound dsp instances, etc.).
+    void teardown() {
+        if (!sched || !state_region) return;
+        const size_t n = sched->bp->size();
+        for (size_t i = 0; i < n; ++i)
+            if (sched->state_bytes[i])
+                sched->bp->nodes[i]->destroy_state(state_region + sched->state_offset[i]);
+        sched = nullptr; // idempotent
+    }
+
     size_t out_offset(size_t node, size_t ch) const {
         return sched->out_base_sample[node] + ch * sched->out_stride[node];
     }
@@ -86,7 +101,12 @@ struct graph_instance {
         for (size_t i = 0; i < silent_size; ++i) silent[i] = 0.0;
 
         for (size_t i = 0; i < n; ++i)
-            if (s.state_bytes[i]) s.bp->nodes[i]->init_state(state_region + s.state_offset[i]);
+            if (s.state_bytes[i]) {
+                node* nd = s.bp->nodes[i].get();
+                void* st = state_region + s.state_offset[i];
+                nd->init_state(st);
+                nd->setup_state(st, sample_rate, block_size);
+            }
 
         // Precompute per-(node,call) contexts and buffer/param views.
         size_t vi = 0, pvi = 0;
