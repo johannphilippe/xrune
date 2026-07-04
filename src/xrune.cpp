@@ -1,58 +1,76 @@
-#include "core.hpp"
+#include "api.hpp"
 #include "standard_nodes.hpp"
-#include "blueprint.hpp"
-#include "schedule.hpp"
-#include "instance.hpp"
-#include "engine.hpp"
 #include <iostream>
 #include <thread>
 #include <chrono>
 
+// Demo of the Phase 9 control API: build a blueprint fluently, spawn voices,
+// automate parameters by name, route through a bus, and manage lifetimes —
+// exactly the surface Idyl will drive.
+
 int main() {
     using namespace xrune;
-    std::cout << "--- Xrune Phase 1: Blueprint / Instance separation ---\n";
+    std::cout << "--- Xrune control API demo ---\n";
 
-    // One blueprint: osc -> gain -> (mono->stereo) -> stereo fader.
-    graph_blueprint bp;
-    size_t osc   = bp.add<oscillator>(440.0);
-    size_t g     = bp.add<gain>(0.25);
-    size_t m2s   = bp.add<mono_to_stereo>();
-    size_t fader = bp.add<stereo_fader>(0.5);
-    bp.connect(osc, 0, g, 0);
-    bp.connect(g, 0, m2s, 0);
-    bp.connect(m2s, 0, fader, 0);
-    bp.connect(m2s, 1, fader, 1);
-    bp.set_output(fader);
+    runtime rt;
+    if (!rt.init({44100, 256, 0, 2, 64, 0})) {
+        std::cerr << "init failed: " << rt.last_error() << "\n";
+        return 1;
+    }
 
-    const size_t sr = 44100, bs = 256;
-    compiled_schedule sched = compile(bp, bs);
-    if (!sched.ok) { std::cerr << "Graph compilation failed!\n"; return 1; }
+    blueprint_id synth = rt.register_blueprint(build("synth")
+        .add<oscillator>("osc", 440.0)
+        .add<gain>("amp", 0.2)
+        .add<mono_to_stereo>("st")
+        .connect("osc", 0, "amp", 0)
+        .connect("amp", 0, "st", 0)
+        .output("st"));
 
-    engine eng;
-    if (!eng.init(sr, bs, 0, 2)) { std::cerr << "Engine init failed!\n"; return 1; }
+    blueprint_id busbp = rt.register_blueprint(build("bus")
+        .add<bus_input>("in_node", 2)
+        .add<stereo_fader>("fader", 0.6)
+        .connect("in_node", 0, "fader", 0)
+        .connect("in_node", 1, "fader", 1)
+        .input_terminal("in", "in_node")
+        .output("fader"));
 
-    // Two independent voices spawned from the same blueprint (handle-addressed).
-    instance_handle v1 = eng.spawn(sched);
-    instance_handle v2 = eng.spawn(sched);
-    if (!v1.valid() || !v2.valid()) { std::cerr << "Spawn failed!\n"; return 1; }
+    if (synth == invalid_blueprint || busbp == invalid_blueprint) {
+        std::cerr << "register failed: " << rt.last_error() << "\n";
+        return 1;
+    }
 
-    if (!eng.start()) { std::cerr << "Failed to start audio!\n"; return 1; }
+    if (!rt.start()) { std::cerr << "start failed\n"; return 1; }
 
-    std::cout << "Two voices, both 440 Hz...\n";
+    // A permanent bus, and two voices routed into it.
+    voice bus = rt.spawn(busbp);
+    spawn_options into_bus; into_bus.into = bus;
+    voice v1 = rt.spawn(synth, into_bus);
+    voice v2 = rt.spawn(synth, into_bus);
+
+    std::cout << "Two voices through the bus (440 Hz)...\n";
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    std::cout << "Detuning voice 2 -> 330 Hz (lock-free, handle-addressed)...\n";
-    eng.set_parameter(v2, osc, 0, 330.0);
+    std::cout << "Detune voice 2 by name: osc.freq = 660...\n";
+    rt.set(v2, "osc", "freq", 660.0);
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    std::cout << "Killing voice 1; spawning a timed voice (0.5s)...\n";
-    eng.kill(v1);
-    lifetime_policy timed{lifetime_kind::timed, static_cast<size_t>(0.5 * sr / bs), 1e-5, 0};
-    eng.spawn(sched, timed);
+    std::cout << "Fade the whole bus down...\n";
+    rt.set(bus, "fader", "volume", 0.2);
     std::this_thread::sleep_for(std::chrono::seconds(1));
-    eng.reclaim();
 
-    eng.stop();
+    std::cout << "Kill voice 1; spawn a 0.5 s timed voice at 880 Hz...\n";
+    rt.kill(v1);
+    spawn_options timed = into_bus;
+    timed.life = rt.for_seconds(0.5);
+    voice v3 = rt.spawn(synth, timed);
+    rt.set(v3, "osc", "freq", 880.0);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    rt.pump();
+
+    std::cout << "Voices alive: v1=" << rt.alive(v1) << " v2=" << rt.alive(v2)
+              << " v3=" << rt.alive(v3) << "\n";
+
+    rt.stop();
     std::cout << "Done.\n";
     return 0;
 }

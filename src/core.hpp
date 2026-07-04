@@ -5,6 +5,8 @@ namespace xrune {
 
 using sample_t = double;
 
+constexpr sample_t PI = 3.14159265358979323846;
+
 struct audio_buffer_view {
     sample_t* data = nullptr;
     size_t size = 0;

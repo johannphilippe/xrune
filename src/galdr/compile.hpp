@@ -1,0 +1,72 @@
+#pragma once
+#include "parser/parser.hpp"
+#include "lower.hpp"
+#include "node_registry.hpp"
+#include "../api.hpp"
+#include <string>
+#include <vector>
+#include <utility>
+#include <fstream>
+#include <iterator>
+
+// Galdr front-to-back: source text -> parsed AST -> lowered graph_blueprints ->
+// registered in a runtime. This is the whole DSL pipeline behind one call;
+// Idyl / tooling use it to load .rune files.
+
+namespace xrune::galdr {
+
+struct load_result {
+    std::vector<std::pair<std::string, blueprint_id>> blueprints; // name -> id
+    diagnostics diags;
+    bool ok() const { return diags.empty(); }
+
+    blueprint_id find(const std::string& name) const {
+        for (const auto& p : blueprints) if (p.first == name) return p.second;
+        return invalid_blueprint;
+    }
+};
+
+// Parse + lower + register every rune in `src` into `rt`. Runtime must be
+// init()'d (block size is needed to compile schedules). Registration failures
+// (graph-level: cycles, rate/block inconsistencies) surface as diagnostics.
+inline load_result load(runtime& rt, const std::string& src, const node_registry& reg) {
+    load_result out;
+
+    parse_result pr = parse(src);
+    for (const auto& d : pr.diags) out.diags.push_back(d);
+    if (!pr.ok()) return out; // do not attempt lowering on a broken parse
+
+    lower_result lr = lower(pr.prog, reg);
+    for (const auto& d : lr.diags) out.diags.push_back(d);
+
+    for (auto& lb : lr.blueprints) {
+        blueprint_builder bb(lb.name);
+        bb.bp = std::move(lb.bp);
+        blueprint_id id = rt.register_blueprint(bb);
+        if (id == invalid_blueprint)
+            out.diags.push_back({"rune '" + lb.name + "': " + rt.last_error(), 0, 0});
+        else
+            out.blueprints.push_back({lb.name, id});
+    }
+    return out;
+}
+
+// Convenience overload using the standard node vocabulary.
+inline load_result load(runtime& rt, const std::string& src) {
+    static const node_registry reg = standard_registry();
+    return load(rt, src, reg);
+}
+
+// Load a .rune file from disk.
+inline load_result load_file(runtime& rt, const std::string& path) {
+    std::ifstream f(path);
+    if (!f) {
+        load_result r;
+        r.diags.push_back({"cannot open file: " + path, 0, 0});
+        return r;
+    }
+    std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    return load(rt, src);
+}
+
+} // namespace xrune::galdr

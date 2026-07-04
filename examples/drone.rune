@@ -1,0 +1,15 @@
+// drone.rune — a detuned drone through a stereo fader.
+// Run: galdr_play examples/drone.rune drone
+
+sigil detuned(f, spread)
+  sine(freq = f) , sine(freq = f * (1 + spread))
+end
+
+rune drone(base = 110)
+  // Two detuned oscillator pairs summed and attenuated.
+  low  = detuned(base, 0.006) :> gain(0.12)
+  high = detuned(base * 2, 0.01) :> gain(0.06)
+
+  // Mono mix -> stereo out.
+  out (low , high) :> m2s
+end

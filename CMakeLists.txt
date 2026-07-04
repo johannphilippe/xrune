@@ -47,6 +47,9 @@ endif()
 add_executable(xrune src/xrune.cpp)
 target_link_libraries(xrune PRIVATE xrune_core)
 
+add_executable(galdr_play src/galdr_play.cpp)
+target_link_libraries(galdr_play PRIVATE xrune_core)
+
 # --- Tests (CTest, headless via offline backend) ---
 enable_testing()
 
@@ -85,3 +88,28 @@ add_test(NAME parallel COMMAND test_parallel)
 add_executable(test_rt_safety tests/test_rt_safety.cpp)
 target_link_libraries(test_rt_safety PRIVATE xrune_core)
 add_test(NAME rt_safety COMMAND test_rt_safety)
+
+add_executable(test_nodes tests/test_nodes.cpp)
+target_link_libraries(test_nodes PRIVATE xrune_core)
+add_test(NAME nodes COMMAND test_nodes)
+
+add_executable(test_fft tests/test_fft.cpp)
+target_link_libraries(test_fft PRIVATE xrune_core)
+add_test(NAME fft COMMAND test_fft)
+
+add_executable(test_api tests/test_api.cpp)
+target_link_libraries(test_api PRIVATE xrune_core)
+add_test(NAME api COMMAND test_api)
+
+add_executable(test_galdr_parse tests/test_galdr_parse.cpp)
+target_link_libraries(test_galdr_parse PRIVATE xrune_core)
+add_test(NAME galdr_parse COMMAND test_galdr_parse)
+
+add_executable(test_galdr_registry tests/test_galdr_registry.cpp)
+target_link_libraries(test_galdr_registry PRIVATE xrune_core)
+add_test(NAME galdr_registry COMMAND test_galdr_registry)
+
+add_executable(test_galdr_lower tests/test_galdr_lower.cpp)
+target_link_libraries(test_galdr_lower PRIVATE xrune_core)
+target_compile_definitions(test_galdr_lower PRIVATE XRUNE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_test(NAME galdr_lower COMMAND test_galdr_lower)
