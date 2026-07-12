@@ -147,16 +147,28 @@ target_link_libraries(test_galdr_lower PRIVATE xrune_core)
 target_compile_definitions(test_galdr_lower PRIVATE XRUNE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME galdr_lower COMMAND test_galdr_lower)
 
-# --- SIMD gain benchmark (perf comparison + simd_gain==gain correctness) ---
-# Built with -O3 -march=native so the intrinsics resolve to this CPU's widest
-# ISA (SSE/AVX2/AVX-512) and the standard gain gets auto-vectorised for a fair
-# comparison. Registered as a test: it returns non-zero if simd_gain diverges.
-add_executable(bench_gain tests/bench_gain.cpp)
-target_link_libraries(bench_gain PRIVATE xrune_core)
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(bench_gain PRIVATE -O3 -march=native)
+# --- SIMD exploration area (src/node/simd_nodes/) --------------------------
+# This directory is a personal sandbox and is NOT tracked in git. Everything
+# here is optional: the project must configure, build and test identically
+# whether or not the directory is present. No tracked source may include it.
+#
+# When present we build bench_gain (simd_gain/simd_rms vs the standard nodes),
+# with -O3 -march=native so the intrinsics resolve to this CPU's widest ISA and
+# the standard nodes get auto-vectorised for a fair comparison. It returns
+# non-zero if a SIMD node diverges from its scalar reference, so it doubles as
+# a correctness test.
+set(XRUNE_SIMD_BENCH ${CMAKE_CURRENT_SOURCE_DIR}/src/node/simd_nodes/bench_gain.cpp)
+if(EXISTS ${XRUNE_SIMD_BENCH})
+    message(STATUS "simd_nodes/ present -- building bench_gain")
+    add_executable(bench_gain ${XRUNE_SIMD_BENCH})
+    target_link_libraries(bench_gain PRIVATE xrune_core)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(bench_gain PRIVATE -O3 -march=native)
+    endif()
+    add_test(NAME bench_gain COMMAND bench_gain)
+else()
+    message(STATUS "simd_nodes/ absent -- skipping bench_gain (optional sandbox)")
 endif()
-add_test(NAME bench_gain COMMAND bench_gain)
 
 # --- Faust node tests (only when the options are enabled) ---
 if(XRUNE_WITH_FAUST_LLVM)
