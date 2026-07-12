@@ -1,3 +1,21 @@
+/*
+ * Xrune — a real-time audio engine, graph and instancing system.
+ * Copyright (C) 2026 Johann Philippe
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 // Shared base for Faust-hosted nodes (JIT and static). Uses Faust's *standard*
 // architecture headers: <faust/dsp/dsp.h> for the dsp base and
@@ -20,6 +38,7 @@
 #include <faust/gui/APIUI.h>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 namespace xrune {
 
@@ -68,6 +87,19 @@ struct faust_node_base : node {
             port_descs.push_back(pd);
         }
         destroy_dsp(tmp);
+    }
+
+    // Override a control port's default (from DSL args), clamped to its range.
+    void set_port_default(const std::string& name, sample_t v) {
+        for (size_t i = 0; i < port_names.size(); ++i)
+            if (port_names[i] == name) {
+                port_descs[i].default_value = std::clamp(v, port_descs[i].min_value, port_descs[i].max_value);
+                return;
+            }
+    }
+    void set_port_default_index(size_t i, sample_t v) {
+        if (i < port_descs.size())
+            port_descs[i].default_value = std::clamp(v, port_descs[i].min_value, port_descs[i].max_value);
     }
 
     // ---- node interface ----

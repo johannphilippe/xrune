@@ -1,3 +1,21 @@
+/*
+ * Xrune — a real-time audio engine, graph and instancing system.
+ * Copyright (C) 2026 Johann Philippe
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "api.hpp"
 #include "standard_nodes.hpp"
 #include "offline_backend.hpp"
@@ -194,6 +212,19 @@ int main() {
         // time helpers
         XR_CHECK(rt.blocks(1.0) == SR / BS);
         XR_CHECK(rt.for_seconds(1.0).ttl_blocks == SR / BS);
+    }
+
+    // --- block size must be a power of two ---
+    XR_RUN("block size validation");
+    {
+        runtime rt;
+        XR_CHECK(!rt.init({SR, 100, 0, 2}));   // 100 is not a power of two
+        XR_CHECK(rt.last_error().find("power of two") != std::string::npos);
+        XR_CHECK(!rt.init({SR, 0, 0, 2}));      // 0 rejected too
+
+        runtime rt2;
+        make_rt(rt2);                            // 128 is fine
+        XR_CHECK(rt2.config().block_size == BS);
     }
 
     XR_MAIN_REPORT();

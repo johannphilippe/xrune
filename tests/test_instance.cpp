@@ -1,3 +1,21 @@
+/*
+ * Xrune — a real-time audio engine, graph and instancing system.
+ * Copyright (C) 2026 Johann Philippe
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "core.hpp"
 #include "standard_nodes.hpp"
 #include "blueprint.hpp"
@@ -6,6 +24,7 @@
 #include "test_util.hpp"
 #include <memory>
 #include <cmath>
+#include <cstdint>
 
 using namespace xrune;
 
@@ -68,6 +87,26 @@ int main() {
         }
         double rms = std::sqrt(sumsq / static_cast<double>(count));
         XR_CHECK_NEAR(rms, 0.70710678118654752440 * 0.5, 0.005);
+    }
+
+    // --- audio buffers are SIMD-aligned (per-channel, with a pow2 block) ---
+    XR_RUN("buffers are 64-byte aligned");
+    {
+        graph_blueprint b;
+        size_t osc = b.add<oscillator>(440.0);
+        size_t gn  = b.add<gain>(0.5);
+        size_t m2s = b.add<mono_to_stereo>();
+        b.connect(osc, 0, gn, 0);
+        b.connect(gn, 0, m2s, 0);
+        b.set_output(m2s);
+        compiled_schedule sd = compile(b, 128); // power-of-two block
+        auto vi = instantiate(sd, sr);
+
+        for (size_t node : {osc, gn, m2s})
+            for (size_t ch = 0; ch < sd.bp->nodes[node]->outputs_count(); ++ch) {
+                auto* p = vi->node_output_view(node, ch).data;
+                XR_CHECK(reinterpret_cast<uintptr_t>(p) % simd_align == 0);
+            }
     }
 
     XR_MAIN_REPORT();

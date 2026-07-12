@@ -1,3 +1,21 @@
+/*
+ * Xrune — a real-time audio engine, graph and instancing system.
+ * Copyright (C) 2026 Johann Philippe
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 #include "core.hpp"
 #include "blueprint.hpp"
@@ -82,11 +100,16 @@ struct graph_instance {
         bytes += 256;
         arena.reserve(bytes);
 
+        // Audio buffers and node state are SIMD-aligned (see core.hpp simd_align).
+        // With a power-of-two block size, each per-channel buffer within
+        // buffer_pool also lands on a 64-byte boundary.
         state_region = s.total_state_bytes
-            ? static_cast<std::byte*>(arena.allocate(s.total_state_bytes, alignof(std::max_align_t)))
+            ? static_cast<std::byte*>(arena.allocate(s.total_state_bytes, simd_align))
             : nullptr;
-        buffer_pool = s.total_output_samples ? arena.allocate_array<sample_t>(s.total_output_samples) : nullptr;
-        silent = arena.allocate_array<sample_t>(silent_size);
+        buffer_pool = s.total_output_samples
+            ? static_cast<sample_t*>(arena.allocate(s.total_output_samples * sizeof(sample_t), simd_align))
+            : nullptr;
+        silent = static_cast<sample_t*>(arena.allocate(silent_size * sizeof(sample_t), simd_align));
         views = total_views ? arena.allocate_array<audio_buffer_view>(total_views) : nullptr;
         contexts = arena.allocate_array<node_processing_context>(s.total_calls);
         controls = s.total_params ? arena.allocate_array<port_control>(s.total_params) : nullptr;

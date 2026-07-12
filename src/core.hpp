@@ -1,3 +1,21 @@
+/*
+ * Xrune — a real-time audio engine, graph and instancing system.
+ * Copyright (C) 2026 Johann Philippe
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 #include <cstddef>
 
@@ -6,6 +24,13 @@ namespace xrune {
 using sample_t = double;
 
 constexpr sample_t PI = 3.14159265358979323846;
+
+// Alignment (bytes) for audio buffers and node state, chosen to satisfy every
+// SIMD width: 64 is a multiple of 16 (SSE), 32 (AVX) and 64 (AVX-512), so an
+// aligned pointer works for all of them, for float and double alike. With a
+// power-of-two block size (enforced at engine init) every per-channel buffer
+// then also starts on a 64-byte boundary.
+constexpr size_t simd_align = 64;
 
 struct audio_buffer_view {
     sample_t* data = nullptr;
@@ -41,6 +66,11 @@ struct param_view {
     sample_t at(size_t i) const {
         return buffer ? buffer[i] : base + inc * static_cast<sample_t>(i);
     }
+
+    const sample_t* addr(size_t i) const  {
+        return buffer + i;
+    }
+
     sample_t first() const { return buffer ? buffer[0] : base; }
     bool is_audio_rate() const { return buffer != nullptr; }
 };
