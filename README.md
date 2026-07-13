@@ -88,8 +88,13 @@ If Graphviz is missing, `xrune` says so and points you at `-d`.
 ### Installing / using Xrune from another project
 
 ```bash
-cmake --install build --prefix /usr/local
+cmake --install build --prefix /usr/local     # installs the `xrune` binary too
 ```
+
+libxrune is **static by default**, so the installed `xrune` binary is
+self-contained. Build a shared library with `-DXRUNE_SHARED=ON`; the installed
+binaries then carry a relative rpath (`$ORIGIN/../lib`), so they find
+`libxrune.so` from any prefix without `ldconfig` or `LD_LIBRARY_PATH`.
 
 Headers install under `<prefix>/include/xrune/`, so downstream code writes:
 

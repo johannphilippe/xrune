@@ -31,6 +31,18 @@ set(XRUNE_SANITIZE "" CACHE STRING "Build with a sanitizer (thread/address/undef
 
 option(XRUNE_BUILD_TESTS "Build the test suite" ON)
 option(XRUNE_BUILD_APPS  "Build the example applications" ON)
+option(XRUNE_SHARED      "Build libxrune as a shared library" OFF)
+
+# RtAudio's CMakeLists calls option(BUILD_SHARED_LIBS ... ON), which is a GLOBAL
+# cache variable — so simply depending on it used to flip libxrune to SHARED
+# behind our back, and the installed `xrune` then failed at run time with
+# "libxrune.so: cannot open shared object file". Never let a dependency decide
+# our linkage: pass the type to add_library() explicitly.
+if(XRUNE_SHARED)
+    set(XRUNE_LIB_TYPE SHARED)
+else()
+    set(XRUNE_LIB_TYPE STATIC)
+endif()
 
 # ---------------------------------------------------------------------------
 # Optional Faust host nodes (dependency policy: the core stays dependency-free)
@@ -71,7 +83,7 @@ find_program(FAUST_COMPILER faust)
 #   util/arena, util/mpmc_queue, util/rt_check   RT-hot, must inline
 #   node/faust/*  templates
 # ---------------------------------------------------------------------------
-add_library(xrune
+add_library(xrune ${XRUNE_LIB_TYPE}
     src/api.cpp
     src/engine.cpp
     src/schedule.cpp
@@ -86,6 +98,24 @@ target_include_directories(xrune PUBLIC
 )
 target_link_libraries(xrune PUBLIC rtaudio readerwriterqueue Threads::Threads)
 target_compile_features(xrune PUBLIC cxx_std_20)
+
+# When built shared, the installed binaries must find libxrune.so without the
+# user running ldconfig or setting LD_LIBRARY_PATH.
+#
+# The rpath is RELATIVE ($ORIGIN/../lib), not the absolute CMAKE_INSTALL_FULL_LIBDIR:
+# that variable is fixed at *configure* time from CMAKE_INSTALL_PREFIX, so a later
+# `cmake --install --prefix /somewhere/else` would bake a path pointing at the
+# wrong tree. $ORIGIN resolves against the binary's own location, so the install
+# is relocatable.
+if(APPLE)
+    set(XRUNE_RPATH "@loader_path/../${CMAKE_INSTALL_LIBDIR}")
+else()
+    set(XRUNE_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+endif()
+
+set_target_properties(xrune PROPERTIES
+    INSTALL_RPATH "${XRUNE_RPATH}"
+    INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 if(XRUNE_SANITIZE)
     target_compile_options(xrune PUBLIC -fsanitize=${XRUNE_SANITIZE} -g -O1)
@@ -117,6 +147,9 @@ if(XRUNE_BUILD_APPS)
     set_target_properties(xrune_cli PROPERTIES OUTPUT_NAME xrune)
     target_link_libraries(xrune_cli PRIVATE xrune::xrune)
     target_compile_definitions(xrune_cli PRIVATE XRUNE_VERSION="${PROJECT_VERSION}")
+    set_target_properties(xrune_cli PROPERTIES
+        INSTALL_RPATH "${XRUNE_RPATH}"
+        INSTALL_RPATH_USE_LINK_PATH TRUE)
 
     # C++ API demo (not installed).
     add_executable(xrune_demo apps/demo.cpp)
