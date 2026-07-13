@@ -60,11 +60,30 @@ cmake -S . -B build -DXRUNE_WITH_FAUST=ON       # static: faust-generated C++
 cmake -S . -B build -DXRUNE_WITH_FAUST_LLVM=ON  # JIT: compile .dsp at runtime
 ```
 
-Play a `.rune` file:
+### The `xrune` command
+
+One binary does everything:
 
 ```bash
-./build/xrune_play examples/drone.rune drone 5   # file, rune name, seconds
+./build/xrune examples/drone.rune            # play it
+./build/xrune -e examples/drone.rune         # check it compiles (no audio)
+./build/xrune -l examples/drone.rune         # list the runes in the file
+./build/xrune -j examples/drone.rune         # emit JSON (reloadable)
+./build/xrune -d examples/drone.rune         # emit Graphviz DOT
+./build/xrune -p examples/drone.rune -o g.png  # render a PNG graph
 ```
+
+`-e/--eval` exits non-zero with `file:line:col` diagnostics, so it drops straight
+into a Makefile or a CI job. Every mode except `run` uses the offline backend, so
+they work headless — no audio device required.
+
+PNG output shells out to Graphviz's **`dot`** (`apt install graphviz`). That's a
+deliberate choice: linking `libgvc` would drag a heavy build dependency into an
+otherwise self-contained project to do something the `dot` binary already does.
+If Graphviz is missing, `xrune` says so and points you at `-d`.
+
+`xrune --help` lists the rest (`-r/--rune`, `-o/--output`, `-s/--seconds`,
+`--sample-rate`, `--block-size`, `--compact`).
 
 ### Installing / using Xrune from another project
 
@@ -98,7 +117,7 @@ include/xrune/     public headers — this is what gets installed
   node/              standard nodes, fft, multirate, faust/
   lang/              the language front-end (lexer, parser, lowering)
 src/               implementation (.cpp)
-apps/              xrune_play, demo
+apps/              xrune (the CLI), demo
 tests/             the suite
 ```
 

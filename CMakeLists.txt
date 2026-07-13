@@ -111,12 +111,18 @@ target_link_libraries(xrune_core INTERFACE xrune)
 # Applications
 # ---------------------------------------------------------------------------
 if(XRUNE_BUILD_APPS)
-    add_executable(xrune_app apps/xrune.cpp)
-    set_target_properties(xrune_app PROPERTIES OUTPUT_NAME xrune_demo)
-    target_link_libraries(xrune_app PRIVATE xrune::xrune)
+    # The CLI. Target name must differ from the library target `xrune`, but the
+    # binary it produces is plain `xrune`.
+    add_executable(xrune_cli apps/xrune.cpp)
+    set_target_properties(xrune_cli PROPERTIES OUTPUT_NAME xrune)
+    target_link_libraries(xrune_cli PRIVATE xrune::xrune)
+    target_compile_definitions(xrune_cli PRIVATE XRUNE_VERSION="${PROJECT_VERSION}")
 
-    add_executable(xrune_play apps/xrune_play.cpp)
-    target_link_libraries(xrune_play PRIVATE xrune::xrune)
+    # C++ API demo (not installed).
+    add_executable(xrune_demo apps/demo.cpp)
+    target_link_libraries(xrune_demo PRIVATE xrune::xrune)
+
+    install(TARGETS xrune_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 # ---------------------------------------------------------------------------
