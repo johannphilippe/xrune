@@ -89,6 +89,15 @@ struct node_processing_context {
     size_t block_size = 128;
 };
 
+// One construction-time argument of a node ("inputs" = 4, "size" = 1024), as
+// reported by node::config_args(). Serialization needs these to rebuild a node:
+// params()/param_default() describe the *ports*, this describes the *constructor*.
+// POD on purpose — no allocation, no includes.
+struct node_config_arg {
+    const char* name = "";
+    sample_t value = 0.0;
+};
+
 // Node model (pre_roadmap §2, §5): a node type is *stateless code*. It describes
 // its audio I/O, its control ports, and the size of a per-instance state block,
 // and its process() operates on state + context supplied by the instance. Port
@@ -107,6 +116,21 @@ struct node {
     virtual sample_t param_default(size_t i) const {
         const port_descriptor* p = params();
         return p ? p[i].default_value : 0.0;
+    }
+
+    // ---- Introspection / serialization (control thread only) ----
+
+    // The node's type name as registered in the node registry ("sine", "gain",
+    // "mix", ...). The serializer writes it; the loader looks up the matching
+    // factory. A node that returns the default is exportable but not loadable.
+    virtual const char* type_name() const { return "node"; }
+
+    // Construction-time configuration that is *not* a control port: a mixer's
+    // input count, an FFT size. Ports are covered by params()/param_default();
+    // these cover the constructor arguments, which are otherwise unrecoverable
+    // from a node's public interface. Write up to `max` entries, return how many.
+    virtual size_t config_args(node_config_arg* out, size_t max) const {
+        (void)out; (void)max; return 0;
     }
 
     // Multi-rate (Phase 5): output *sample rate* as a ratio of the input rate.

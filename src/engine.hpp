@@ -82,7 +82,15 @@ struct engine {
     std::vector<uint32_t> active_list;
     std::vector<active_route> routes;
 
-    std::vector<std::vector<sample_t>> master_buffers;
+    // Master mix buffers, one per output channel. Allocated from an arena at
+    // init() (control thread) so each channel starts on a `simd_align` (64-byte)
+    // boundary, exactly like an instance's buffer_pool. Each channel gets its own
+    // aligned allocation rather than a strided slice of one block, so alignment
+    // holds for *any* block size (a strided layout would only be 64-aligned once
+    // block_size * sizeof(sample_t) >= 64). Indexing is unchanged:
+    // master_buffers[channel][frame].
+    memory_arena master_arena;
+    sample_t** master_buffers = nullptr;
 
     moodycamel::ReaderWriterQueue<command_event> command_queue;
     moodycamel::ReaderWriterQueue<telemetry_event> telemetry_queue;
@@ -132,8 +140,20 @@ struct engine {
         command_queue = moodycamel::ReaderWriterQueue<command_event>(max_instances * 8 + 64);
         telemetry_queue = moodycamel::ReaderWriterQueue<telemetry_event>(max_instances * 4 + 16);
 
-        master_buffers.resize(output_channels);
-        for (auto& buf : master_buffers) buf.assign(block_size, 0.0);
+        // Master buffers: one 64-byte-aligned block per output channel, plus the
+        // pointer table, all from one arena reservation. Each channel allocation
+        // is rounded up to simd_align, so budget that per channel.
+        const size_t chan_bytes = block_size * sizeof(sample_t);
+        master_arena.reserve(output_channels * (chan_bytes + simd_align)
+                             + output_channels * sizeof(sample_t*) + simd_align);
+        master_buffers = master_arena.allocate_array<sample_t*>(output_channels);
+        if (!master_buffers) return false;
+        for (size_t ch = 0; ch < output_channels; ++ch) {
+            master_buffers[ch] = static_cast<sample_t*>(
+                master_arena.allocate(chan_bytes, simd_align));
+            if (!master_buffers[ch]) return false;
+            std::fill(master_buffers[ch], master_buffers[ch] + block_size, 0.0);
+        }
 
         if (!backend) backend = std::make_unique<rtaudio_backend>();
 
@@ -198,7 +218,8 @@ struct engine {
         const size_t nf = std::min<size_t>(n_frames, block_size);
 
         drain_commands();
-        for (auto& buf : master_buffers) std::fill(buf.begin(), buf.end(), 0.0);
+        for (size_t ch = 0; ch < output_channels; ++ch)
+            std::fill(master_buffers[ch], master_buffers[ch] + block_size, 0.0);
 
         // Compute every active instance's output (fills buffers + input terminals).
         if (workers && active_list.size() >= 2) compute_parallel(nf);

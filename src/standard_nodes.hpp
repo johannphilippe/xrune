@@ -29,6 +29,7 @@ namespace xrune {
 // OSCILLATOR  (port: freq; state: phase). freq is modulatable (FM/vibrato).
 // ============================================================================
 struct oscillator : node {
+    const char* type_name() const override { return "sine"; }
     struct st { sample_t phase; };
     static constexpr port_descriptor PORTS[] = {{"freq", 440.0, 0.0, 20000.0}};
     sample_t default_freq = 440.0;
@@ -62,6 +63,7 @@ struct oscillator : node {
 // GAIN  (port: gain; stateless)
 // ============================================================================
 struct gain : node {
+    const char* type_name() const override { return "gain"; }
     static constexpr port_descriptor PORTS[] = {{"gain", 1.0, -1e30, 1e30}};
     sample_t default_value = 1.0;
 
@@ -84,6 +86,12 @@ struct gain : node {
 // MIXER / STEREO MIXER  (stateless; no ports)
 // ============================================================================
 struct mixer : node {
+    const char* type_name() const override { return "mix"; }
+    size_t config_args(node_config_arg* out, size_t max) const override {
+        if (max < 1) return 0;
+        out[0] = {"inputs", static_cast<sample_t>(in_count)};
+        return 1;
+    }
     size_t in_count = 2;
     mixer() = default;
     explicit mixer(size_t ins) : in_count(ins) {}
@@ -99,6 +107,12 @@ struct mixer : node {
 };
 
 struct stereo_mixer : node {
+    const char* type_name() const override { return "smix"; }
+    size_t config_args(node_config_arg* out, size_t max) const override {
+        if (max < 1) return 0;
+        out[0] = {"inputs", static_cast<sample_t>(in_count)};
+        return 1;
+    }
     size_t in_count = 2; // number of stereo pairs
     stereo_mixer() = default;
     explicit stereo_mixer(size_t ins) : in_count(ins) {}
@@ -121,6 +135,7 @@ struct stereo_mixer : node {
 // STEREO FADER  (port: volume; stateless)
 // ============================================================================
 struct stereo_fader : node {
+    const char* type_name() const override { return "fader"; }
     static constexpr port_descriptor PORTS[] = {{"volume", 1.0, 0.0, 1e30}};
     sample_t default_volume = 1.0;
 
@@ -146,6 +161,12 @@ struct stereo_fader : node {
 // BUS INPUT  (stateless; no ports) - engine fills its outputs from routes.
 // ============================================================================
 struct bus_input : node {
+    const char* type_name() const override { return "bus"; }
+    size_t config_args(node_config_arg* out, size_t max) const override {
+        if (max < 1) return 0;
+        out[0] = {"channels", static_cast<sample_t>(n)};
+        return 1;
+    }
     size_t n;
     explicit bus_input(size_t channels = 2) : n(channels) {}
     size_t inputs_count() const override { return 0; }
@@ -157,6 +178,13 @@ struct bus_input : node {
 // CHANNEL ADAPTER  (stateless; no ports)
 // ============================================================================
 struct channel_adapter : node {
+    const char* type_name() const override { return "adapt"; }
+    size_t config_args(node_config_arg* out, size_t max) const override {
+        if (max < 2) return 0;
+        out[0] = {"inputs", static_cast<sample_t>(num_inputs)};
+        out[1] = {"outputs", static_cast<sample_t>(num_outputs)};
+        return 2;
+    }
     size_t num_inputs;
     size_t num_outputs;
     channel_adapter(size_t inputs = 1, size_t outputs = 1)
@@ -198,6 +226,7 @@ struct channel_adapter : node {
 // MONO<->STEREO  (stateless; no ports)
 // ============================================================================
 struct mono_to_stereo : node {
+    const char* type_name() const override { return "m2s"; }
     size_t inputs_count() const override { return 1; }
     size_t outputs_count() const override { return 2; }
     void process(void*, const node_processing_context& ctx) const override {
@@ -210,6 +239,7 @@ struct mono_to_stereo : node {
 };
 
 struct stereo_to_mono : node {
+    const char* type_name() const override { return "s2m"; }
     size_t inputs_count() const override { return 2; }
     size_t outputs_count() const override { return 1; }
     void process(void*, const node_processing_context& ctx) const override {
@@ -222,6 +252,7 @@ struct stereo_to_mono : node {
 // PAN  (port: pan in [-1,1]; stateless). Equal-power; pan is modulatable.
 // ============================================================================
 struct pan : node {
+    const char* type_name() const override { return "pan"; }
     static constexpr port_descriptor PORTS[] = {{"pan", 0.0, -1.0, 1.0}};
     sample_t default_pos = 0.0;
 
@@ -251,6 +282,7 @@ struct pan : node {
 // INVERTER / STEREO INVERTER / ADD / MULTIPLY  (stateless; no ports)
 // ============================================================================
 struct inverter : node {
+    const char* type_name() const override { return "inv"; }
     size_t inputs_count() const override { return 1; }
     size_t outputs_count() const override { return 1; }
     void process(void*, const node_processing_context& ctx) const override {
@@ -259,6 +291,7 @@ struct inverter : node {
 };
 
 struct stereo_inverter : node {
+    const char* type_name() const override { return "sinv"; }
     size_t inputs_count() const override { return 2; }
     size_t outputs_count() const override { return 2; }
     void process(void*, const node_processing_context& ctx) const override {
@@ -268,6 +301,7 @@ struct stereo_inverter : node {
 };
 
 struct add : node {
+    const char* type_name() const override { return "add"; }
     size_t inputs_count() const override { return 2; }
     size_t outputs_count() const override { return 1; }
     void process(void*, const node_processing_context& ctx) const override {
@@ -277,6 +311,7 @@ struct add : node {
 };
 
 struct multiply : node {
+    const char* type_name() const override { return "mul"; }
     size_t inputs_count() const override { return 2; }
     size_t outputs_count() const override { return 1; }
     void process(void*, const node_processing_context& ctx) const override {
@@ -290,6 +325,7 @@ struct multiply : node {
 // its (modulatable) port value.
 // ============================================================================
 struct constant : node {
+    const char* type_name() const override { return "constant"; }
     static constexpr port_descriptor PORTS[] = {{"value", 1.0, -1e30, 1e30}};
     sample_t default_value = 1.0;
 
@@ -311,6 +347,7 @@ struct constant : node {
 // WHITE NOISE  (state: xorshift64* seed; no ports; seed is blueprint config)
 // ============================================================================
 struct white_noise : node {
+    const char* type_name() const override { return "noise"; }
     struct st { uint64_t seed; };
     uint64_t default_seed = 0x853c49e6748fea9bULL;
 
@@ -342,6 +379,7 @@ struct white_noise : node {
 // CALL COUNTER  (passthrough that counts process() calls; test/introspection)
 // ============================================================================
 struct call_counter : node {
+    const char* type_name() const override { return "counter"; }
     struct st { size_t calls; };
     size_t inputs_count() const override { return 1; }
     size_t outputs_count() const override { return 1; }
@@ -359,6 +397,7 @@ struct call_counter : node {
 // SAMPLE AND HOLD  (port: rate Hz; state: held/counter). rate read per block.
 // ============================================================================
 struct sample_and_hold : node {
+    const char* type_name() const override { return "sah"; }
     struct st { sample_t held; size_t counter; };
     static constexpr port_descriptor PORTS[] = {{"rate", 1.0, -1e30, 1e30}};
     sample_t default_rate = 1.0;

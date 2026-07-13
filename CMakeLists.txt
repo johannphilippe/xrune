@@ -147,6 +147,10 @@ target_link_libraries(test_galdr_lower PRIVATE xrune_core)
 target_compile_definitions(test_galdr_lower PRIVATE XRUNE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME galdr_lower COMMAND test_galdr_lower)
 
+add_executable(test_serialize tests/test_serialize.cpp)
+target_link_libraries(test_serialize PRIVATE xrune_core)
+add_test(NAME serialize COMMAND test_serialize)
+
 # --- SIMD exploration area (src/node/simd_nodes/) --------------------------
 # This directory is a personal sandbox and is NOT tracked in git. Everything
 # here is optional: the project must configure, build and test identically

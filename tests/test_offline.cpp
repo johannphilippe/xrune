@@ -101,5 +101,22 @@ int main() {
         XR_CHECK_NEAR(obp->peak(0), 0.0, 1e-12);
     }
 
+    // --- master buffers are SIMD-aligned, for any block size ---
+    // They come from an arena at simd_align, one aligned allocation per channel,
+    // so alignment holds even for tiny blocks (a strided single-block layout
+    // would only be 64-aligned once block_size * sizeof(sample_t) >= 64).
+    XR_RUN("master buffers are 64-byte aligned");
+    {
+        for (size_t block : {4u, 8u, 32u, 128u, 1024u}) {
+            engine eng;
+            eng.use_backend(std::make_unique<offline_backend>());
+            XR_CHECK(eng.init(sr, block, 0, 2));
+            for (size_t ch = 0; ch < eng.output_channels; ++ch) {
+                auto addr = reinterpret_cast<uintptr_t>(eng.master_buffers[ch]);
+                XR_CHECK(addr % simd_align == 0);
+            }
+        }
+    }
+
     XR_MAIN_REPORT();
 }

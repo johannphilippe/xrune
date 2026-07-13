@@ -1,11 +1,447 @@
 # ⬢ X̸rune
 
   ᚷ A real‑time audio engine for Idƴl programs. \
-  ᚷ Gentle enough to be an execution engine for other programs too. 
+  ᚷ Gentle enough to be an execution engine for other programs too.
 
-## Components 
+Xrune runs audio graphs. You describe a graph once — in C++ or in **Galdr**, its
+small companion language — then spawn it hundreds of times as independent, cheap
+*voices*, each with its own state, its own parameters, and its own place in a
+routing network. The audio thread never allocates, never locks, never blocks.
 
- ᚷ Engine : An audio engine featuring realtime or offline DSP processing  \
- ᚷ Graph : The rune system, allowing to combine & connect several audio nodes together  \
- ᚷ Nodes : Standard block for DSP processing \
- ᚷ Galdr : An tiny DSL designed to describe runes audio graphs \ 
+```galdr
+rune drone(base = 110)
+  low  = detuned(base, 0.006) :> gain(0.12)
+  high = detuned(base * 2, 0.01) :> gain(0.06)
+  out (low , high) :> m2s
+end
+```
+
+## Components
+
+ ᚷ **Engine** : realtime or offline DSP processing \
+ ᚷ **Graph** : the rune system — combine & connect audio nodes \
+ ᚷ **Nodes** : standard blocks for DSP processing \
+ ᚷ **Galdr** : a tiny DSL to describe rune audio graphs
+
+---
+
+## Contents
+
+- [Build](#build)
+- [The mechanism](#the-mechanism) — how the engine actually works
+- [Using the C++ API](#using-the-c-api)
+- [Galdr, the DSL](#galdr-the-dsl)
+- [Node vocabulary](#node-vocabulary)
+- [Serialization & graph export](#serialization--graph-export)
+- [Faust nodes](#faust-nodes)
+- [Status](#status)
+- [License](#license)
+
+---
+
+## Build
+
+Header-only core; RtAudio and readerwriterqueue are fetched by CMake. Needs C++20.
+
+```bash
+cmake -S . -B build
+cmake --build build -j
+cd build && ctest              # 17 suites
+```
+
+Optional Faust support:
+
+```bash
+cmake -S . -B build -DXRUNE_WITH_FAUST=ON       # static: faust-generated C++
+cmake -S . -B build -DXRUNE_WITH_FAUST_LLVM=ON  # JIT: compile .dsp at runtime
+```
+
+Play a `.rune` file:
+
+```bash
+./build/galdr_play examples/drone.rune drone 5   # file, rune name, seconds
+```
+
+---
+
+## The mechanism
+
+### Blueprint → schedule → instance
+
+The central separation. A **blueprint** is an immutable description of a graph.
+Compiling it yields a **compiled schedule** — execution order, buffer
+assignments, per-node call counts — computed *once*. An **instance** is one live
+voice: a single arena allocation holding its buffers and its DSP state.
+
+```
+graph_blueprint  ──compile()──▶  compiled_schedule  ──instantiate()──▶  graph_instance
+   (topology)                     (order, buffers)                          (a voice)
+        │                                │                                      │
+  described once                   computed once                        spawned N times
+```
+
+Many instances share one blueprint and one schedule. Spawning copies no topology
+and does no graph work — it takes an arena and initializes state. That is what
+makes hundreds of simultaneous voices cheap.
+
+### Nodes are stateless code
+
+A node *type* is `const` code. It describes its I/O, its control ports, and how
+many bytes of state it needs — but never owns mutable DSP state:
+
+```cpp
+void process(void* state, const node_processing_context& ctx) const override;
+```
+
+Per-instance state lives in that instance's arena and is handed back on every
+call. This is why one `oscillator` object can serve 200 voices, each with its own
+phase.
+
+### Hybrid ports
+
+A control port is **control-rate by default, audio-rate when something is
+connected to it**. Node code never branches on this — it reads through one view:
+
+```cpp
+ctx.params[0].at(i)     // per-sample value, whatever the port's rate
+ctx.params[0].first()   // just the block's value, if that's all you need
+```
+
+Control-rate values arrive as a click-free linear ramp from the previous block's
+value to the new target, so `set()` never zippers. Connect an LFO to the same
+port and it silently becomes a per-sample audio-rate stream.
+
+### Multi-rate: call-count scheduling
+
+A node declares its output rate as a ratio of its input rate (`up2` is 2/1,
+`down2` is 1/2). The compiler propagates these along the edges to give every node
+a *region rate*, and the scheduler simply **calls a node as many times per block
+as its region demands**. Oversampling a nonlinearity is one word:
+
+```galdr
+over(2, shaper)     // runs `shaper` at 2x: up2 : shaper : down2
+```
+
+Rate conversion is a proper half-band FIR — the upsampler zero-stuffs and
+filters, the downsampler filters then decimates. No interpolation.
+
+A second, independent axis is **block size**: `downbloc` makes a region run at a
+finer block (more calls, same sample rate), which is what buffering and spectral
+nodes need.
+
+### Parallelism
+
+Per-instance: each active voice is a task, workers and the audio thread drain a
+lock-free MPMC queue, and an atomic counter is the block barrier. Instances own
+disjoint arenas and the master sum happens single-threaded afterwards, so
+**parallel output is bit-identical to sequential**.
+
+```cpp
+rt.init({.workers = 4});     // 0 = single-threaded
+```
+
+### Real-time safety
+
+The audio thread does not allocate. That isn't a claim, it's a test: a global
+`operator new` trap is armed during `process()`, and a 500-block stress run
+(parameter automation + spawn/kill + rewiring, 4 workers) asserts **zero**
+allocations. Denormals are flushed (FTZ/DAZ) on every audio thread. Commands
+reach the audio thread over a lock-free queue, and voices are addressed by
+`{slot, generation}` handles — so a stale handle is dropped, never applied to a
+recycled voice.
+
+---
+
+## Using the C++ API
+
+Everything below lives in `src/api.hpp`.
+
+### Describe a graph
+
+The builder is fluent, addresses nodes by name, and accumulates errors rather
+than throwing:
+
+```cpp
+#include "api.hpp"
+using namespace xrune;
+
+blueprint_builder synth("synth");
+synth
+    .add<oscillator>("osc", 440.0)
+    .add<oscillator>("lfo", 3.0)
+    .add<gain>("amp", 0.25)
+    .connect("osc", 0, "amp", 0)         // audio: osc -> amp
+    .modulate("lfo", 0, "amp", "gain")   // audio-rate LFO -> the gain port
+    .output("amp");
+```
+
+A builder owns its nodes (`unique_ptr`), so it is move-only — bind it to a named
+`blueprint_builder` as above, or register the chain in one expression:
+`rt.register_blueprint(build("synth").add<gain>("g", 0.5).output("g"));`
+
+### Run it
+
+```cpp
+runtime rt;
+rt.init({.sample_rate = 48000, .block_size = 128, .output_channels = 2});
+rt.start();
+
+blueprint_id id = rt.register_blueprint(synth);
+voice v = rt.spawn(id);
+```
+
+Block size **must be a power of two** — `init()` refuses otherwise, because the
+64-byte buffer alignment guarantee depends on it.
+
+### Change parameters
+
+By name, or pre-resolved when you'll set it often:
+
+```cpp
+rt.set(v, "amp", "gain", 0.5);          // by name
+
+param_ref g = rt.resolve(id, "amp", "gain");
+rt.set(v, g, 0.5);                      // no lookup on the hot path
+```
+
+### Voice lifetimes
+
+Voices can clean up after themselves, so you don't have to track them:
+
+```cpp
+spawn_options o;
+o.life = {lifetime_kind::timed, rt.blocks(2.0)};   // reaped after 2 seconds
+rt.spawn(id, o);
+```
+
+`permanent` (default) · `timed` · `until_finished` · `until_silent`. Reaped
+voices are recycled; `rt.pump()` collects them on the control thread.
+
+### Routing between voices
+
+Voices aren't just leaves — they route into each other. Spawn a bus, then spawn
+synths *into* it:
+
+```cpp
+voice bus = rt.spawn(reverb_bus);         // bus -> master
+spawn_options into; into.into = bus;
+voice v = rt.spawn(synth, into);          // synth -> bus
+
+rt.unroute(v, bus);                       // rewire at runtime,
+rt.route_to_master(v);                    // while it plays
+```
+
+A blueprint exposes named **terminals** (`input_terminal` / `output_terminal`),
+so routing addresses a port of a voice, not merely "the voice".
+
+### Introspection
+
+`rt.describe(id)` returns the node list, every port with its range and default,
+and the terminals — enough for a host (Idyl, a GUI, a tool) to discover a patch
+it has never seen.
+
+### Offline rendering
+
+Swap the backend; nothing else changes:
+
+```cpp
+auto ob = std::make_unique<offline_backend>();
+offline_backend* p = ob.get();
+rt.use_backend(std::move(ob));
+rt.init({}); rt.start();
+
+p->render(200);                  // 200 blocks, no audio device
+double level = p->rms(0);
+```
+
+---
+
+## Galdr, the DSL
+
+Galdr describes graphs. Files are `.rune`. It takes its connection algebra from
+Faust, its small surface from Lua, and its `… end` blocks from Ruby.
+
+```cpp
+#include "galdr/compile.hpp"
+auto r = galdr::load_file(rt, "examples/drone.rune");   // parse + lower + register
+```
+
+### Runes and sigils
+
+A **rune** is a blueprint. A **sigil** is a reusable fragment — expanded at
+compile time, so it costs nothing at run time.
+
+```galdr
+sigil detuned(f, spread)
+  sine(freq = f) , sine(freq = f * (1 + spread))
+end
+
+rune drone(base = 110)
+  out detuned(base, 0.006) :> gain(0.12)
+end
+```
+
+Both take parameters, with optional defaults. Arithmetic on them (`f * (1 +
+spread)`) is evaluated at compile time.
+
+### Nodes
+
+```galdr
+sine(freq = 440)      // named argument
+sine(440)             // positional
+amp = gain(0.5)       // bind a name, to refer to it later
+```
+
+### The connection algebra
+
+Four operators, Faust's. **`,` binds tightest; `:>` loosest.**
+
+| Operator | Meaning | Arity rule |
+|---|---|---|
+| `A , B` | **parallel** — stack side by side | none; arities add |
+| `A : B` | **sequential** — A's outputs into B's inputs, in order | `outs(A) == ins(B)` |
+| `A <: B` | **split** — duplicate A's outputs to fill B's inputs | `ins(B) % outs(A) == 0` |
+| `A :> B` | **merge** — *sum* groups of A's outputs into B's inputs | `outs(A) % ins(B) == 0` |
+
+So `sine , sine :> gain` parses as `(sine , sine) :> gain` — two oscillators
+summed into one gain. Arity mismatches are compile errors, not silent surprises.
+
+### Modulation and explicit wiring
+
+```galdr
+lfo ~> amp.gain       // audio-rate signal into a control port
+a[1] -> b[0]          // an explicit wire, when the algebra is the wrong tool
+```
+
+### Terminals
+
+```galdr
+input in(channels = 2)   // a bus other voices can be routed into
+out mix                  // this voice's output
+out send as aux          // a second, named output terminal
+```
+
+### Multi-rate
+
+`over(n, E)` runs any expression `E` at n× the sample rate:
+
+```galdr
+over(2, shaper)       // up2 : shaper : down2
+```
+
+There is no built-in saturator — `shaper` is whatever you supply (your own node,
+or a Faust one). `over` is about the *scheduling*, not the DSP.
+
+> `finer(n, …)`, the block-size counterpart, is **specified but not implemented**
+> — it needs the `upbloc` node. Using it is a clean compile error, not a silent
+> misbehaviour.
+
+### Putting it together
+
+```galdr
+// examples/drone.rune
+sigil detuned(f, spread)
+  sine(freq = f) , sine(freq = f * (1 + spread))
+end
+
+rune drone(base = 110)
+  low  = detuned(base, 0.006) :> gain(0.12)
+  high = detuned(base * 2, 0.01) :> gain(0.06)
+  out (low , high) :> m2s
+end
+```
+
+### Editor support
+
+Syntax highlighting for `.rune` files lives in [editors/](editors/):
+
+```bash
+cd editors/vim    && ./install.sh              # Vim / Neovim (Linux, macOS)
+cd editors/vscode && ./build_vsix.sh --install # VS Code / VSCodium
+```
+
+Comments are `// …` and `/* … */`. Newlines terminate statements (suppressed inside
+brackets). Errors carry line, column and a message.
+
+---
+
+## Node vocabulary
+
+The names Galdr and the JSON loader use, from `galdr::standard_registry()`. Add
+your own with `registry.add(name, factory)` and it becomes a DSL word *and*
+JSON-loadable, for free.
+
+| | |
+|---|---|
+| **sources** | `sine(freq)` · `noise` · `constant(value)` |
+| **level** | `gain(gain)` · `fader(volume)` · `pan(pan)` · `inv` · `sinv` |
+| **mixing** | `mix(inputs)` · `smix(inputs)` · `add` · `mul` · `adapt(inputs, outputs)` |
+| **channels** | `m2s` · `s2m` · `bus(channels)` |
+| **multi-rate** | `up2` · `down2` · `downbloc` |
+| **spectral** | `stft(size)` · `stft_fwd(size, channels)` · `stft_bwd(size, channels)` |
+| **misc** | `sah(rate)` · `counter` |
+
+---
+
+## Serialization & graph export
+
+A blueprint round-trips through JSON — and a reloaded patch renders
+**bit-identical audio**:
+
+```cpp
+#include "serialize.hpp"
+
+std::string text = to_json(bp, "patch");                 // save
+
+graph_blueprint re; std::string err;
+from_json(text, galdr::standard_registry(), re, err);    // load
+```
+
+Nodes are rebuilt through the node registry, so anything registered — Faust and
+future host nodes included — is loadable with no extra work.
+
+Graphs export to Graphviz:
+
+```cpp
+std::string dot = to_dot(bp, "patch");   // dot -Tsvg patch.dot -o patch.svg
+```
+
+Audio edges are solid; audio-rate modulation is a dashed edge labelled with the
+port it drives; rate-changing nodes are highlighted as region boundaries.
+
+---
+
+## Faust nodes
+
+Two ways to host [Faust](https://faust.grame.fr) DSP, both behind CMake options:
+
+- **static** (`XRUNE_WITH_FAUST`) — `faust_static<Dsp>` wraps a Faust-generated
+  C++ class. No runtime dependency; the DSP is compiled into your binary.
+- **JIT** (`XRUNE_WITH_FAUST_LLVM`) — `faust_jit` compiles a `.dsp` at runtime
+  through libfaust/LLVM.
+
+Faust parameters become ordinary Xrune ports, so they smooth, modulate and
+serialize like any other. Register one as a DSL word and it's a Galdr node.
+
+> If the JIT segfaults inside `getNumInputs()`, your `libfaust.so` doesn't match
+> the Faust headers you built against — an ABI mismatch, not an Xrune bug.
+
+---
+
+## Status
+
+**Working**: the engine, graph/instancing, hybrid ports, multi-rate,
+per-instance parallelism, RT-safety, FFT/STFT nodes, the Galdr front-end, the
+C++ API, JSON/DOT serialization, Faust hosting.
+
+**Not yet**: `upbloc` (and therefore `finer`), Csound and libsndfile hosts,
+node-level parallelism with chain fusion, pooled spawn, push-based voice-end
+events.
+
+---
+
+## License
+
+GPL-3.0-or-later — see [LICENSE](LICENSE).
+
+Copyright (C) 2026 Johann Philippe

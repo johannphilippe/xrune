@@ -112,6 +112,8 @@ inline node_registry standard_registry() {
     r.add("m2s",      [](const node_args&)  { return std::make_unique<mono_to_stereo>(); });
     r.add("s2m",      [](const node_args&)  { return std::make_unique<stereo_to_mono>(); });
     r.add("inv",      [](const node_args&)  { return std::make_unique<inverter>(); });
+    r.add("sinv",     [](const node_args&)  { return std::make_unique<stereo_inverter>(); });
+    r.add("counter",  [](const node_args&)  { return std::make_unique<call_counter>(); });
     r.add("add",      [](const node_args&)  { return std::make_unique<add>(); });
     r.add("mul",      [](const node_args&)  { return std::make_unique<multiply>(); });
     r.add("sah",      [](const node_args& a){ return std::make_unique<sample_and_hold>(a.num("rate", 0, 1.0)); });

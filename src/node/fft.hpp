@@ -103,6 +103,12 @@ private:
 // the FFT size, not the host block): [counter][in_ring:N][ola_ring:2N][re:N][im:N].
 // ============================================================================
 struct ola_stft : node {
+    const char* type_name() const override { return "stft"; }
+    size_t config_args(node_config_arg* out, size_t max) const override {
+        if (max < 1) return 0;
+        out[0] = {"size", static_cast<sample_t>(fft_size)};
+        return 1;
+    }
     size_t fft_size;
     size_t hop;
     fft_plan plan;                 // immutable, shared
@@ -201,6 +207,13 @@ struct ola_stft : node {
 //   stft_backward: 2*channels inputs (re,im) -> `channels` time outputs
 // ============================================================================
 struct stft_forward : node {
+    const char* type_name() const override { return "stft_fwd"; }
+    size_t config_args(node_config_arg* out, size_t max) const override {
+        if (max < 2) return 0;
+        out[0] = {"size", static_cast<sample_t>(fft_size)};
+        out[1] = {"channels", static_cast<sample_t>(channels)};
+        return 2;
+    }
     size_t fft_size;
     size_t channels;
     fft_plan plan;
@@ -228,6 +241,13 @@ struct stft_forward : node {
 };
 
 struct stft_backward : node {
+    const char* type_name() const override { return "stft_bwd"; }
+    size_t config_args(node_config_arg* out, size_t max) const override {
+        if (max < 2) return 0;
+        out[0] = {"size", static_cast<sample_t>(fft_size)};
+        out[1] = {"channels", static_cast<sample_t>(channels)};
+        return 2;
+    }
     size_t fft_size;
     size_t channels;
     fft_plan plan;

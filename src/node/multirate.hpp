@@ -93,6 +93,7 @@ inline sample_t halfband_step(halfband_state* s, sample_t in) {
 // samples per call, writes B.
 // ============================================================================
 struct upsampler2 : node {
+    const char* type_name() const override { return "up2"; }
     size_t inputs_count() const override { return 1; }
     size_t outputs_count() const override { return 1; }
     size_t rate_num() const override { return 2; }
@@ -121,6 +122,7 @@ struct upsampler2 : node {
 // every two). Reads 2B samples per call, writes B.
 // ============================================================================
 struct downsampler2 : node {
+    const char* type_name() const override { return "down2"; }
     size_t inputs_count() const override { return 1; }
     size_t outputs_count() const override { return 1; }
     size_t rate_num() const override { return 1; }
@@ -152,6 +154,7 @@ struct downsampler2 : node {
 // internal-buffering Tier-2 host nodes (FFT, Csound) in a later phase.
 // ============================================================================
 struct downbloc : node {
+    const char* type_name() const override { return "downbloc"; }
     size_t inputs_count() const override { return 1; }
     size_t outputs_count() const override { return 1; }
     size_t block_num() const override { return 1; }
