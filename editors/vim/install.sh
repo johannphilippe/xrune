@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — Install the Galdr Vim plugin (syntax highlighting for *.rune)
+# install.sh — Install the Xrune Vim plugin (syntax highlighting for *.rune)
 #
 # Works on Linux and macOS, with Vim, Neovim, or both.
 #
@@ -11,10 +11,10 @@
 #   ./install.sh --uninstall   # remove installed files
 #
 # Installs:
-#   syntax/galdr.vim     — syntax highlighting
-#   ftdetect/galdr.vim   — filetype detection for *.rune
-#   ftplugin/galdr.vim   — comments, indent width, folding, matchit
-#   indent/galdr.vim     — auto-indent inside rune/sigil … end
+#   syntax/xrune.vim     — syntax highlighting
+#   ftdetect/xrune.vim   — filetype detection for *.rune
+#   ftplugin/xrune.vim   — comments, indent width, folding, matchit
+#   indent/xrune.vim     — auto-indent inside rune/sigil … end
 
 set -euo pipefail
 
@@ -34,6 +34,15 @@ die()  { printf "${RED}✗${NC} %s\n" "$*" >&2; exit 1; }
 
 # ── Files to install (relative to editors/vim/) ──────────────────────────────
 FILES=(
+  "syntax/xrune.vim"
+  "ftdetect/xrune.vim"
+  "ftplugin/xrune.vim"
+  "indent/xrune.vim"
+)
+
+# Files from the pre-rename plugin (the language was called "Galdr"). They must
+# be removed, or the stale syntax/ftdetect keeps shadowing the new ones.
+LEGACY_FILES=(
   "syntax/galdr.vim"
   "ftdetect/galdr.vim"
   "ftplugin/galdr.vim"
@@ -43,6 +52,13 @@ FILES=(
 install_to() {
   local dst_root="$1" label="$2"
   info "Installing into $dst_root  ($label)"
+
+  for rel in "${LEGACY_FILES[@]}"; do
+    if [[ -f "$dst_root/$rel" ]]; then
+      rm -f "$dst_root/$rel"
+      warn "  removed legacy $rel"
+    fi
+  done
 
   local any=0
   for rel in "${FILES[@]}"; do
@@ -66,7 +82,7 @@ uninstall_from() {
   info "Removing from $dst_root  ($label)"
 
   local any=0
-  for rel in "${FILES[@]}"; do
+  for rel in "${FILES[@]}" "${LEGACY_FILES[@]}"; do
     local dst="$dst_root/$rel"
     if [[ -f "$dst" ]]; then
       rm -f "$dst"
@@ -132,7 +148,7 @@ for arg in "$@"; do
 done
 
 # ── Main ─────────────────────────────────────────────────────────────────────
-echo "Galdr Vim plugin installer"
+echo "Xrune Vim plugin installer"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 VIM_DIR=""

@@ -1,4 +1,4 @@
-" Vim filetype plugin for Galdr (Xrune audio graph DSL)
+" Vim filetype plugin for Xrune (Xrune audio graph DSL)
 " License: GPL-3.0-or-later
 
 if exists('b:did_ftplugin')
@@ -13,7 +13,7 @@ set cpo&vim
 setlocal commentstring=//\ %s
 setlocal comments=s1:/*,mb:*,ex:*/,://
 
-" Galdr has no semicolons; statements are newline-terminated.
+" Xrune has no semicolons; statements are newline-terminated.
 setlocal formatoptions-=t formatoptions+=croql
 
 " Two-space indent, as in the examples.

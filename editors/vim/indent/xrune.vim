@@ -1,4 +1,4 @@
-" Vim indent file for Galdr (Xrune audio graph DSL)
+" Vim indent file for Xrune (Xrune audio graph DSL)
 " Indent inside rune/sigil … end blocks.
 " License: GPL-3.0-or-later
 
@@ -7,14 +7,14 @@ if exists('b:did_indent')
 endif
 let b:did_indent = 1
 
-setlocal indentexpr=GetGaldrIndent()
+setlocal indentexpr=GetXruneIndent()
 setlocal indentkeys=0=end,o,O,!^F
 
-if exists('*GetGaldrIndent')
+if exists('*GetXruneIndent')
   finish
 endif
 
-function! GetGaldrIndent() abort
+function! GetXruneIndent() abort
   let l:prev = prevnonblank(v:lnum - 1)
   if l:prev == 0
     return 0

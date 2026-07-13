@@ -1,5 +1,5 @@
 " Vim syntax file
-" Language:    Galdr (Xrune audio graph DSL)
+" Language:    Xrune (Xrune audio graph DSL)
 " Filenames:   *.rune
 " License:     GPL-3.0-or-later
 "
@@ -19,100 +19,100 @@ let s:cpo_save = &cpo
 set cpo&vim
 
 " ── Numbers: 440, 0.25, 1e-3, 0x1F ──────────────────────────────────────────
-syn match   galdrNumber       '\<0[xX]\x\+\>'
-syn match   galdrFloat        '\<\d\+\.\d\+\([eE][-+]\?\d\+\)\?\>'
-syn match   galdrFloat        '\<\d\+[eE][-+]\?\d\+\>'
-syn match   galdrNumber       '\<\d\+\>'
+syn match   xruneNumber       '\<0[xX]\x\+\>'
+syn match   xruneFloat        '\<\d\+\.\d\+\([eE][-+]\?\d\+\)\?\>'
+syn match   xruneFloat        '\<\d\+[eE][-+]\?\d\+\>'
+syn match   xruneNumber       '\<\d\+\>'
 
 " ── Keywords ────────────────────────────────────────────────────────────────
-syn keyword galdrKeyword      rune sigil end
-syn keyword galdrKeyword      input out as
-syn keyword galdrBoolean      true false
+syn keyword xruneKeyword      rune sigil end
+syn keyword xruneKeyword      input out as
+syn keyword xruneBoolean      true false
 
 " ── Builtin combinators: over(n, E) / finer(n, E) ───────────────────────────
-syn keyword galdrCombinator   over finer
+syn keyword xruneCombinator   over finer
 
-" ── The standard node vocabulary (galdr::standard_registry) ─────────────────
-syn keyword galdrNode         sine noise constant
-syn keyword galdrNode         gain fader pan inv sinv
-syn keyword galdrNode         mix smix add mul adapt
-syn keyword galdrNode         m2s s2m bus
-syn keyword galdrNode         up2 down2 downbloc
-syn keyword galdrNode         stft stft_fwd stft_bwd
-syn keyword galdrNode         sah counter
+" ── The standard node vocabulary (xrune::standard_registry) ─────────────────
+syn keyword xruneNode         sine noise constant
+syn keyword xruneNode         gain fader pan inv sinv
+syn keyword xruneNode         mix smix add mul adapt
+syn keyword xruneNode         m2s s2m bus
+syn keyword xruneNode         up2 down2 downbloc
+syn keyword xruneNode         stft stft_fwd stft_bwd
+syn keyword xruneNode         sah counter
 
 " ── Arithmetic / assignment ─────────────────────────────────────────────────
 " (defined before comments, so `//` still wins over the `/` here)
-syn match   galdrOperator     '[+\-*/%]'
-syn match   galdrAssign       '='
+syn match   xruneOperator     '[+\-*/%]'
+syn match   xruneAssign       '='
 
 " ── The connection algebra ──────────────────────────────────────────────────
 " Defined after the arithmetic match so the multi-char forms take precedence.
-syn match   galdrSeq          ':'
-syn match   galdrPar          ','
-syn match   galdrSplit        '<:'
-syn match   galdrMerge        ':>'
-syn match   galdrWire         '->'
-syn match   galdrModulate     '\~>'
+syn match   xruneSeq          ':'
+syn match   xrunePar          ','
+syn match   xruneSplit        '<:'
+syn match   xruneMerge        ':>'
+syn match   xruneWire         '->'
+syn match   xruneModulate     '\~>'
 
 " ── Port access on a node: amp.gain ─────────────────────────────────────────
 " nextgroup keeps `gain` here from being coloured as the `gain` NODE keyword.
-syn match   galdrDot          '\.' nextgroup=galdrPort
-syn match   galdrPort         '[a-zA-Z_][a-zA-Z0-9_]*' contained
+syn match   xruneDot          '\.' nextgroup=xrunePort
+syn match   xrunePort         '[a-zA-Z_][a-zA-Z0-9_]*' contained
 
 " ── Channel index: a[0] -> b[1] ─────────────────────────────────────────────
-syn match   galdrIndex        '\[\d\+\]'
+syn match   xruneIndex        '\[\d\+\]'
 
 " ── A named argument inside a call: sine(freq = 440) ────────────────────────
-syn match   galdrArgName      '\<[a-zA-Z_][a-zA-Z0-9_]*\ze\s*=[^=]'
+syn match   xruneArgName      '\<[a-zA-Z_][a-zA-Z0-9_]*\ze\s*=[^=]'
 
 " ── Rune / sigil name in a definition ───────────────────────────────────────
-syn match   galdrDefName      '\(\<\(rune\|sigil\)\s\+\)\@<=[a-zA-Z_][a-zA-Z0-9_]*'
+syn match   xruneDefName      '\(\<\(rune\|sigil\)\s\+\)\@<=[a-zA-Z_][a-zA-Z0-9_]*'
 
 " ── Strings ─────────────────────────────────────────────────────────────────
-syn region  galdrString       start='"' skip='\\"' end='"' contains=galdrEscape
-syn match   galdrEscape       '\\.' contained
+syn region  xruneString       start='"' skip='\\"' end='"' contains=xruneEscape
+syn match   xruneEscape       '\\.' contained
 
 " ── Comments (LAST: highest priority, so `//` beats the `/` operator) ───────
-syn keyword galdrTodo         TODO FIXME XXX NOTE HACK contained
-syn match   galdrComment      '//.*$'               contains=galdrTodo,@Spell
-syn region  galdrComment      start='/\*' end='\*/' contains=galdrTodo,@Spell
+syn keyword xruneTodo         TODO FIXME XXX NOTE HACK contained
+syn match   xruneComment      '//.*$'               contains=xruneTodo,@Spell
+syn region  xruneComment      start='/\*' end='\*/' contains=xruneTodo,@Spell
 
 " ── Folding: rune/sigil … end ───────────────────────────────────────────────
-syn region  galdrBlock
+syn region  xruneBlock
       \ start='^\s*\<\(rune\|sigil\)\>'
       \ end='^\s*\<end\>'
       \ transparent fold keepend
 
 " ── Highlight links ─────────────────────────────────────────────────────────
-hi def link galdrComment      Comment
-hi def link galdrTodo         Todo
-hi def link galdrString       String
-hi def link galdrEscape       SpecialChar
-hi def link galdrNumber       Number
-hi def link galdrFloat        Float
-hi def link galdrBoolean      Boolean
-hi def link galdrKeyword      Keyword
-hi def link galdrCombinator   Function
-hi def link galdrNode         Type
-hi def link galdrDefName      Identifier
-hi def link galdrArgName      Identifier
-hi def link galdrPort         Identifier
-hi def link galdrDot          Delimiter
-hi def link galdrIndex        Special
+hi def link xruneComment      Comment
+hi def link xruneTodo         Todo
+hi def link xruneString       String
+hi def link xruneEscape       SpecialChar
+hi def link xruneNumber       Number
+hi def link xruneFloat        Float
+hi def link xruneBoolean      Boolean
+hi def link xruneKeyword      Keyword
+hi def link xruneCombinator   Function
+hi def link xruneNode         Type
+hi def link xruneDefName      Identifier
+hi def link xruneArgName      Identifier
+hi def link xrunePort         Identifier
+hi def link xruneDot          Delimiter
+hi def link xruneIndex        Special
 
 " The algebra is the heart of the language — each operator gets its own group so
 " a colour scheme can distinguish them, with sane defaults.
-hi def link galdrSeq          Operator
-hi def link galdrPar          Operator
-hi def link galdrSplit        Statement
-hi def link galdrMerge        Statement
-hi def link galdrModulate     PreProc
-hi def link galdrWire         PreProc
-hi def link galdrOperator     Operator
-hi def link galdrAssign       Operator
+hi def link xruneSeq          Operator
+hi def link xrunePar          Operator
+hi def link xruneSplit        Statement
+hi def link xruneMerge        Statement
+hi def link xruneModulate     PreProc
+hi def link xruneWire         PreProc
+hi def link xruneOperator     Operator
+hi def link xruneAssign       Operator
 
-let b:current_syntax = 'galdr'
+let b:current_syntax = 'xrune'
 
 let &cpo = s:cpo_save
 unlet s:cpo_save

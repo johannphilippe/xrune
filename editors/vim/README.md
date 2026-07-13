@@ -1,7 +1,7 @@
-# Galdr — Vim / Neovim support
+# Xrune — Vim / Neovim support
 
-Syntax highlighting, folding and indentation for Galdr (`.rune`), the audio-graph
-DSL of [Xrune](../../README.md).
+Syntax highlighting, folding and indentation for the [Xrune](../../README.md)
+language (`.rune` files).
 
 ## Install
 
@@ -33,10 +33,10 @@ Plug '/path/to/xrune/editors/vim'                " vim-plug
 
 | File | Purpose |
 |---|---|
-| `syntax/galdr.vim` | highlighting |
-| `ftdetect/galdr.vim` | `*.rune` → `filetype=galdr` |
-| `ftplugin/galdr.vim` | `//` comments, 2-space indent, folding, `%` matching |
-| `indent/galdr.vim` | auto-indent inside `rune`/`sigil` … `end` |
+| `syntax/xrune.vim` | highlighting |
+| `ftdetect/xrune.vim` | `*.rune` → `filetype=xrune` |
+| `ftplugin/xrune.vim` | `//` comments, 2-space indent, folding, `%` matching |
+| `indent/xrune.vim` | auto-indent inside `rune`/`sigil` … `end` |
 
 **Highlighted:** keywords (`rune` `sigil` `end` `input` `out` `as`), the node
 vocabulary (`sine` `gain` `mix` …) as types, the combinators `over`/`finer`,
@@ -47,18 +47,18 @@ tell them apart:
 
 | Operator | Group | Default |
 |---|---|---|
-| `,` parallel | `galdrPar` | Operator |
-| `:` sequential | `galdrSeq` | Operator |
-| `<:` split | `galdrSplit` | Statement |
-| `:>` merge | `galdrMerge` | Statement |
-| `~>` modulate | `galdrModulate` | PreProc |
-| `->` explicit wire | `galdrWire` | PreProc |
+| `,` parallel | `xrunePar` | Operator |
+| `:` sequential | `xruneSeq` | Operator |
+| `<:` split | `xruneSplit` | Statement |
+| `:>` merge | `xruneMerge` | Statement |
+| `~>` modulate | `xruneModulate` | PreProc |
+| `->` explicit wire | `xruneWire` | PreProc |
 
 Override them in your vimrc:
 
 ```vim
-hi galdrMerge    ctermfg=214 guifg=#fabd2f
-hi galdrModulate ctermfg=142 guifg=#b8bb26
+hi xruneMerge    ctermfg=214 guifg=#fabd2f
+hi xruneModulate ctermfg=142 guifg=#b8bb26
 ```
 
 ## Editing
