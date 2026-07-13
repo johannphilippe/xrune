@@ -17,8 +17,8 @@
  */
 
 #pragma once
-#include "core.hpp"
-#include "instance.hpp"
+#include "xrune/core.hpp"
+#include "xrune/instance.hpp"
 #include <vector>
 #include <cstdint>
 #include <memory>

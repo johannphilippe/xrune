@@ -17,21 +17,21 @@
  */
 
 #pragma once
-#include "parser/parser.hpp"
-#include "lower.hpp"
-#include "node_registry.hpp"
-#include "../api.hpp"
+#include "xrune/lang/parser/parser.hpp"
+#include "xrune/lang/lower.hpp"
+#include "xrune/lang/node_registry.hpp"
+#include "xrune/api.hpp"
 #include <string>
 #include <vector>
 #include <utility>
 #include <fstream>
 #include <iterator>
 
-// Galdr front-to-back: source text -> parsed AST -> lowered graph_blueprints ->
+// Xrune front-to-back: source text -> parsed AST -> lowered graph_blueprints ->
 // registered in a runtime. This is the whole DSL pipeline behind one call;
 // Idyl / tooling use it to load .rune files.
 
-namespace xrune::galdr {
+namespace xrune::lang {
 
 struct load_result {
     std::vector<std::pair<std::string, blueprint_id>> blueprints; // name -> id
@@ -87,4 +87,4 @@ inline load_result load_file(runtime& rt, const std::string& path) {
     return load(rt, src);
 }
 
-} // namespace xrune::galdr
+} // namespace xrune::lang

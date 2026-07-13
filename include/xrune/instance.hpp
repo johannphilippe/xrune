@@ -17,10 +17,10 @@
  */
 
 #pragma once
-#include "core.hpp"
-#include "blueprint.hpp"
-#include "schedule.hpp"
-#include "arena.hpp"
+#include "xrune/core.hpp"
+#include "xrune/blueprint.hpp"
+#include "xrune/schedule.hpp"
+#include "xrune/util/arena.hpp"
 #include <memory>
 #include <new>
 #include <algorithm>

@@ -17,7 +17,7 @@
  */
 
 #pragma once
-#include "../core.hpp"
+#include "xrune/core.hpp"
 #include <cmath>
 #include <algorithm>
 #include <array>
@@ -159,6 +159,17 @@ struct downbloc : node {
     size_t outputs_count() const override { return 1; }
     size_t block_num() const override { return 1; }
     size_t block_den() const override { return 2; }
+    void process(void*, const node_processing_context& ctx) const override {
+        for (size_t i = 0; i < ctx.block_size; ++i) ctx.outputs[0][i] = ctx.inputs[0][i];
+    }
+};
+
+struct upbloc: node {
+    const char* type_name() const override { return "upbloc"; }
+    size_t inputs_count() const override { return 1; }
+    size_t outputs_count() const override { return 1; }
+    size_t block_num() const override { return 2; }
+    size_t block_den() const override { return 1; }
     void process(void*, const node_processing_context& ctx) const override {
         for (size_t i = 0; i < ctx.block_size; ++i) ctx.outputs[0][i] = ctx.inputs[0][i];
     }

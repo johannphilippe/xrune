@@ -1,7 +1,7 @@
 {
-  "name": "galdr-lang",
-  "displayName": "Galdr Language",
-  "description": "Syntax highlighting for Galdr — the audio-graph DSL of the Xrune real-time audio engine (.rune files).",
+  "name": "xrune-lang",
+  "displayName": "Xrune Language",
+  "description": "Syntax highlighting for Xrune — the audio-graph DSL of the Xrune real-time audio engine (.rune files).",
   "version": "0.1.0",
   "publisher": "xrune",
   "license": "GPL-3.0-or-later",
@@ -14,10 +14,10 @@
   "contributes": {
     "languages": [
       {
-        "id": "galdr",
+        "id": "xrune",
         "aliases": [
-          "Galdr",
-          "galdr",
+          "Xrune",
+          "xrune",
           "rune"
         ],
         "extensions": [
@@ -28,9 +28,9 @@
     ],
     "grammars": [
       {
-        "language": "galdr",
-        "scopeName": "source.galdr",
-        "path": "./syntaxes/galdr.tmLanguage.json"
+        "language": "xrune",
+        "scopeName": "source.xrune",
+        "path": "./syntaxes/xrune.tmLanguage.json"
       }
     ]
   }

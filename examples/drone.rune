@@ -1,5 +1,5 @@
 // drone.rune — a detuned drone through a stereo fader.
-// Run: galdr_play examples/drone.rune drone
+// Run: xrune_play examples/drone.rune drone
 
 sigil detuned(f, spread)
   sine(freq = f) , sine(freq = f * (1 + spread))

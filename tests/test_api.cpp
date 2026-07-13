@@ -16,9 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "api.hpp"
-#include "standard_nodes.hpp"
-#include "offline_backend.hpp"
+#include "xrune/api.hpp"
+#include "xrune/node/standard_nodes.hpp"
+#include "xrune/audio/offline_backend.hpp"
 #include "test_util.hpp"
 #include <memory>
 

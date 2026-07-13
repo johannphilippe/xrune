@@ -17,29 +17,29 @@
  */
 
 #pragma once
-// Register Faust programs as Galdr/registry node types, so a .dsp becomes a DSL
+// Register Faust programs as language/registry node types, so a .dsp becomes a DSL
 // word usable like any built-in node (`myfaust(param = value)`, modulation into
 // its ports, per-voice instances). Guarded by the Faust CMake options; without
 // them this header adds nothing.
 //
-//   node_registry reg = galdr::standard_registry();
-//   galdr::register_faust(reg, "reverb", "reverb.dsp", /*is_file=*/true);   // JIT
-//   galdr::register_faust_static<mydsp>(reg, "synth");                      // static
-//   galdr::load(rt, source, reg);
+//   node_registry reg = lang::standard_registry();
+//   lang::register_faust(reg, "reverb", "reverb.dsp", /*is_file=*/true);   // JIT
+//   lang::register_faust_static<mydsp>(reg, "synth");                      // static
+//   lang::load(rt, source, reg);
 
-#include "node_registry.hpp"
+#include "xrune/lang/node_registry.hpp"
 
 #if defined(XRUNE_WITH_FAUST_LLVM)
-#include "../node/faust/faust_jit.hpp"
+#include "xrune/node/faust/faust_jit.hpp"
 #endif
 #if defined(XRUNE_WITH_FAUST)
-#include "../node/faust/faust_static.hpp"
+#include "xrune/node/faust/faust_static.hpp"
 #endif
 
 #include <string>
 #include <memory>
 
-namespace xrune::galdr {
+namespace xrune::lang {
 
 // Apply DSL call arguments as Faust port-default overrides (positional by port
 // index, named by port name).
@@ -80,4 +80,4 @@ inline void register_faust_static(node_registry& reg, const std::string& name) {
 }
 #endif
 
-} // namespace xrune::galdr
+} // namespace xrune::lang

@@ -16,12 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "serialize.hpp"
-#include "json.hpp"
-#include "schedule.hpp"
-#include "instance.hpp"
-#include "standard_nodes.hpp"
-#include "node/fft.hpp"
+#include "xrune/serialize.hpp"
+#include "xrune/util/json.hpp"
+#include "xrune/schedule.hpp"
+#include "xrune/instance.hpp"
+#include "xrune/node/standard_nodes.hpp"
+#include "xrune/node/fft.hpp"
 #include "test_util.hpp"
 #include <fstream>
 
@@ -54,7 +54,7 @@ static graph_blueprint make_patch() {
 }
 
 int main() {
-    galdr::node_registry reg = galdr::standard_registry();
+    lang::node_registry reg = lang::standard_registry();
 
     // --- the JSON layer itself -------------------------------------------
     XR_RUN("json parse/dump round-trip");

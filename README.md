@@ -3,12 +3,16 @@
   ᚷ A real‑time audio engine for Idƴl programs. \
   ᚷ Gentle enough to be an execution engine for other programs too.
 
-Xrune runs audio graphs. You describe a graph once — in C++ or in **Galdr**, its
-small companion language — then spawn it hundreds of times as independent, cheap
-*voices*, each with its own state, its own parameters, and its own place in a
-routing network. The audio thread never allocates, never locks, never blocks.
+**Xrune is two things: a real-time audio engine, and the small language that
+drives it.** You describe an audio graph once — in the Xrune language, or through
+the C++ API — then spawn it hundreds of times as independent, cheap *voices*,
+each with its own state, its own parameters, and its own place in a routing
+network. The audio thread never allocates, never locks, never blocks.
 
-```galdr
+Programs are `.rune` files, built from **runes** (graphs) and **sigils**
+(reusable fragments).
+
+```rune
 rune drone(base = 110)
   low  = detuned(base, 0.006) :> gain(0.12)
   high = detuned(base * 2, 0.01) :> gain(0.06)
@@ -21,7 +25,7 @@ end
  ᚷ **Engine** : realtime or offline DSP processing \
  ᚷ **Graph** : the rune system — combine & connect audio nodes \
  ᚷ **Nodes** : standard blocks for DSP processing \
- ᚷ **Galdr** : a tiny DSL to describe rune audio graphs
+ ᚷ **Language** : a tiny DSL to describe rune audio graphs
 
 ---
 
@@ -30,7 +34,7 @@ end
 - [Build](#build)
 - [The mechanism](#the-mechanism) — how the engine actually works
 - [Using the C++ API](#using-the-c-api)
-- [Galdr, the DSL](#galdr-the-dsl)
+- [The Xrune language](#the-xrune-language)
 - [Node vocabulary](#node-vocabulary)
 - [Serialization & graph export](#serialization--graph-export)
 - [Faust nodes](#faust-nodes)
@@ -41,7 +45,7 @@ end
 
 ## Build
 
-Header-only core; RtAudio and readerwriterqueue are fetched by CMake. Needs C++20.
+RtAudio and readerwriterqueue are fetched by CMake. Needs C++20.
 
 ```bash
 cmake -S . -B build
@@ -59,8 +63,50 @@ cmake -S . -B build -DXRUNE_WITH_FAUST_LLVM=ON  # JIT: compile .dsp at runtime
 Play a `.rune` file:
 
 ```bash
-./build/galdr_play examples/drone.rune drone 5   # file, rune name, seconds
+./build/xrune_play examples/drone.rune drone 5   # file, rune name, seconds
 ```
+
+### Installing / using Xrune from another project
+
+```bash
+cmake --install build --prefix /usr/local
+```
+
+Headers install under `<prefix>/include/xrune/`, so downstream code writes:
+
+```cpp
+#include <xrune/api.hpp>
+#include <xrune/node/standard_nodes.hpp>
+```
+
+and CMake finds it as a package:
+
+```cmake
+find_package(xrune REQUIRED)
+target_link_libraries(my_app PRIVATE xrune::xrune)
+```
+
+### Source layout
+
+```
+include/xrune/     public headers — this is what gets installed
+  core.hpp           the node interface (derive from this to write a node)
+  api.hpp            the control API
+  blueprint.hpp  schedule.hpp  instance.hpp  engine.hpp  serialize.hpp
+  audio/             backend interface, RtAudio, offline
+  util/              arena, json, mpmc_queue, worker_pool, rt_check
+  node/              standard nodes, fft, multirate, faust/
+  lang/              the language front-end (lexer, parser, lowering)
+src/               implementation (.cpp)
+apps/              xrune_play, demo
+tests/             the suite
+```
+
+Most headers are declarations only; the implementation is compiled into the
+library. A few stay header-only **on purpose**: `core.hpp` (the interface node
+authors derive from), `blueprint.hpp` (templates), and `util/arena.hpp` /
+`util/mpmc_queue.hpp` / `util/rt_check.hpp`, which are real-time-hot and must
+inline.
 
 ---
 
@@ -118,7 +164,7 @@ A node declares its output rate as a ratio of its input rate (`up2` is 2/1,
 a *region rate*, and the scheduler simply **calls a node as many times per block
 as its region demands**. Oversampling a nonlinearity is one word:
 
-```galdr
+```rune
 over(2, shaper)     // runs `shaper` at 2x: up2 : shaper : down2
 ```
 
@@ -154,7 +200,7 @@ recycled voice.
 
 ## Using the C++ API
 
-Everything below lives in `src/api.hpp`.
+Everything below lives in `include/xrune/api.hpp`.
 
 ### Describe a graph
 
@@ -162,7 +208,7 @@ The builder is fluent, addresses nodes by name, and accumulates errors rather
 than throwing:
 
 ```cpp
-#include "api.hpp"
+#include <xrune/api.hpp>
 using namespace xrune;
 
 blueprint_builder synth("synth");
@@ -256,14 +302,15 @@ double level = p->rms(0);
 
 ---
 
-## Galdr, the DSL
+## The Xrune language
 
-Galdr describes graphs. Files are `.rune`. It takes its connection algebra from
-Faust, its small surface from Lua, and its `… end` blocks from Ruby.
+The language shares the project's name: an Xrune program *is* an audio graph.
+Files are `.rune`. It takes its connection algebra from Faust, its small surface
+from Lua, and its `… end` blocks from Ruby.
 
 ```cpp
-#include "galdr/compile.hpp"
-auto r = galdr::load_file(rt, "examples/drone.rune");   // parse + lower + register
+#include <xrune/lang/compile.hpp>
+auto r = lang::load_file(rt, "examples/drone.rune");   // parse + lower + register
 ```
 
 ### Runes and sigils
@@ -271,7 +318,7 @@ auto r = galdr::load_file(rt, "examples/drone.rune");   // parse + lower + regis
 A **rune** is a blueprint. A **sigil** is a reusable fragment — expanded at
 compile time, so it costs nothing at run time.
 
-```galdr
+```rune
 sigil detuned(f, spread)
   sine(freq = f) , sine(freq = f * (1 + spread))
 end
@@ -286,7 +333,7 @@ spread)`) is evaluated at compile time.
 
 ### Nodes
 
-```galdr
+```rune
 sine(freq = 440)      // named argument
 sine(440)             // positional
 amp = gain(0.5)       // bind a name, to refer to it later
@@ -308,14 +355,14 @@ summed into one gain. Arity mismatches are compile errors, not silent surprises.
 
 ### Modulation and explicit wiring
 
-```galdr
+```rune
 lfo ~> amp.gain       // audio-rate signal into a control port
 a[1] -> b[0]          // an explicit wire, when the algebra is the wrong tool
 ```
 
 ### Terminals
 
-```galdr
+```rune
 input in(channels = 2)   // a bus other voices can be routed into
 out mix                  // this voice's output
 out send as aux          // a second, named output terminal
@@ -325,7 +372,7 @@ out send as aux          // a second, named output terminal
 
 `over(n, E)` runs any expression `E` at n× the sample rate:
 
-```galdr
+```rune
 over(2, shaper)       // up2 : shaper : down2
 ```
 
@@ -338,7 +385,7 @@ or a Faust one). `over` is about the *scheduling*, not the DSP.
 
 ### Putting it together
 
-```galdr
+```rune
 // examples/drone.rune
 sigil detuned(f, spread)
   sine(freq = f) , sine(freq = f * (1 + spread))
@@ -367,9 +414,9 @@ brackets). Errors carry line, column and a message.
 
 ## Node vocabulary
 
-The names Galdr and the JSON loader use, from `galdr::standard_registry()`. Add
-your own with `registry.add(name, factory)` and it becomes a DSL word *and*
-JSON-loadable, for free.
+The names the language and the JSON loader use, from `lang::standard_registry()`. Add
+your own with `registry.add(name, factory)` and it becomes a language word
+*and* JSON-loadable, for free.
 
 | | |
 |---|---|
@@ -389,12 +436,12 @@ A blueprint round-trips through JSON — and a reloaded patch renders
 **bit-identical audio**:
 
 ```cpp
-#include "serialize.hpp"
+#include <xrune/serialize.hpp>
 
 std::string text = to_json(bp, "patch");                 // save
 
 graph_blueprint re; std::string err;
-from_json(text, galdr::standard_registry(), re, err);    // load
+from_json(text, lang::standard_registry(), re, err);    // load
 ```
 
 Nodes are rebuilt through the node registry, so anything registered — Faust and
@@ -421,7 +468,7 @@ Two ways to host [Faust](https://faust.grame.fr) DSP, both behind CMake options:
   through libfaust/LLVM.
 
 Faust parameters become ordinary Xrune ports, so they smooth, modulate and
-serialize like any other. Register one as a DSL word and it's a Galdr node.
+serialize like any other. Register one as a DSL word and it's an Xrune node.
 
 > If the JIT segfaults inside `getNumInputs()`, your `libfaust.so` doesn't match
 > the Faust headers you built against — an ABI mismatch, not an Xrune bug.
@@ -431,7 +478,7 @@ serialize like any other. Register one as a DSL word and it's a Galdr node.
 ## Status
 
 **Working**: the engine, graph/instancing, hybrid ports, multi-rate,
-per-instance parallelism, RT-safety, FFT/STFT nodes, the Galdr front-end, the
+per-instance parallelism, RT-safety, FFT/STFT nodes, the language front-end, the
 C++ API, JSON/DOT serialization, Faust hosting.
 
 **Not yet**: `upbloc` (and therefore `finer`), Csound and libsndfile hosts,

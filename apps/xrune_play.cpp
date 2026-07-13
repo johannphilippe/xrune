@@ -16,15 +16,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "galdr/compile.hpp"
+#include "xrune/lang/compile.hpp"
 #include <iostream>
 #include <string>
 #include <thread>
 #include <chrono>
 
-// galdr_play — load a .rune file and play one of its runes through the audio
+// xrune_play — load a .rune file and play one of its runes through the audio
 // device. Usage:
-//   galdr_play [file.rune] [rune-name] [seconds]
+//   xrune_play [file.rune] [rune-name] [seconds]
 // With no file, plays a built-in demo.
 
 static const char* kBuiltin =
@@ -48,8 +48,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    galdr::load_result r = file.empty() ? galdr::load(rt, kBuiltin)
-                                        : galdr::load_file(rt, file);
+    lang::load_result r = file.empty() ? lang::load(rt, kBuiltin)
+                                        : lang::load_file(rt, file);
     if (!r.ok()) {
         std::cerr << (file.empty() ? "<builtin>" : file) << ":\n";
         for (const auto& d : r.diags) std::cerr << "  " << d.format() << "\n";

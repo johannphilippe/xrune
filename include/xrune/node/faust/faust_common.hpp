@@ -33,7 +33,7 @@
 #define FAUSTFLOAT double
 #endif
 
-#include "../../core.hpp"
+#include "xrune/core.hpp"
 #include <faust/dsp/dsp.h>
 #include <faust/gui/APIUI.h>
 #include <string>

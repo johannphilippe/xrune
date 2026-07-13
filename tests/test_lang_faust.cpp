@@ -16,14 +16,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "galdr/faust_registry.hpp"
-#include "galdr/compile.hpp"
-#include "offline_backend.hpp"
+#include "xrune/lang/faust_registry.hpp"
+#include "xrune/lang/compile.hpp"
+#include "xrune/audio/offline_backend.hpp"
 #include "test_util.hpp"
 #include <memory>
 
 using namespace xrune;
-using namespace xrune::galdr;
+using namespace xrune::lang;
 
 static constexpr size_t SR = 48000, BS = 128;
 
@@ -43,7 +43,7 @@ int main() {
                    "gain = hslider(\"gain\", 0.5, 0.0, 2.0, 0.01); process = _ * gain;");
 
     // --- a Faust node is usable as a bare DSL word ---
-    XR_RUN("faust node in Galdr (default)");
+    XR_RUN("faust node in Xrune (default)");
     {
         runtime rt; offline_backend* ob = make_rt(rt);
         auto r = load(rt, "rune s\n  out constant(1.0) : fgain\nend\n", reg);

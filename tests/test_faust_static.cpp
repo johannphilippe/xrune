@@ -16,12 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "core.hpp"
-#include "standard_nodes.hpp"
-#include "blueprint.hpp"
-#include "schedule.hpp"
-#include "instance.hpp"
-#include "node/faust/faust_static.hpp"  // brings faust dsp/UI headers
+#include "xrune/core.hpp"
+#include "xrune/node/standard_nodes.hpp"
+#include "xrune/blueprint.hpp"
+#include "xrune/schedule.hpp"
+#include "xrune/instance.hpp"
+#include "xrune/node/faust/faust_static.hpp"  // brings faust dsp/UI headers
 #include "faustgain.hpp"                // generated at build time (class faustgain)
 #include "test_util.hpp"
 #include <memory>

@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# build_vsix.sh — Build (and optionally install) the galdr-lang VS Code extension.
+# build_vsix.sh — Build (and optionally install) the xrune-lang VS Code extension.
 #
 # A .vsix is just a ZIP with a specific layout, so this needs no npm, no node and
 # no vsce — only `zip`, which every Unix has.
 #
 # Usage:
-#   ./build_vsix.sh              # build galdr-lang-<version>.vsix
+#   ./build_vsix.sh              # build xrune-lang-<version>.vsix
 #   ./build_vsix.sh --install    # build, then install into VS Code
 #   ./build_vsix.sh --clean      # remove built .vsix files
 #
-# The version is read from galdr-lang/package.json.
+# The version is read from xrune-lang/package.json.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXT_DIR="$SCRIPT_DIR/galdr-lang"
+EXT_DIR="$SCRIPT_DIR/xrune-lang"
 
 if [[ -t 1 ]]; then
   GRN='\033[0;32m' YEL='\033[1;33m' BLU='\033[0;34m' RED='\033[0;31m' NC='\033[0m'
@@ -26,11 +26,11 @@ info() { printf "${BLU}→${NC} %s\n" "$*"; }
 warn() { printf "${YEL}!${NC} %s\n" "$*"; }
 die()  { printf "${RED}✗${NC} %s\n" "$*" >&2; exit 1; }
 
-# Files packaged into the extension (relative to galdr-lang/).
+# Files packaged into the extension (relative to xrune-lang/).
 FILES=(
   "package.json"
   "language-configuration.json"
-  "syntaxes/galdr.tmLanguage.json"
+  "syntaxes/xrune.tmLanguage.json"
 )
 
 # Read a top-level string field out of package.json without needing jq.
@@ -82,7 +82,7 @@ ENGINE="$(pkg_engine)"
 
 VSIX="$SCRIPT_DIR/${NAME}-${VERSION}.vsix"
 
-echo "Galdr VS Code extension builder"
+echo "Xrune VS Code extension builder"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 info "$DISPLAY $VERSION  (publisher: $PUBLISHER)"
 
@@ -92,7 +92,7 @@ trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/extension"
 for rel in "${FILES[@]}"; do
-  [[ -f "$EXT_DIR/$rel" ]] || die "missing file: galdr-lang/$rel"
+  [[ -f "$EXT_DIR/$rel" ]] || die "missing file: xrune-lang/$rel"
   mkdir -p "$STAGE/extension/$(dirname "$rel")"
   cp -f "$EXT_DIR/$rel" "$STAGE/extension/$rel"
   ok "  packaged $rel"
@@ -119,7 +119,7 @@ cat > "$STAGE/extension.vsixmanifest" <<XML
     <Description xml:space="preserve">${DESC}</Description>
     <DisplayName>${DISPLAY}</DisplayName>
     <Identity Language="en-US" Id="${NAME}" Version="${VERSION}" Publisher="${PUBLISHER}" />
-    <Tags>galdr,rune,xrune,audio,dsl,syntax</Tags>
+    <Tags>xrune,rune,audio,dsl,syntax</Tags>
     <GalleryFlags>Public</GalleryFlags>
     <Properties>
       <Property Id="Microsoft.VisualStudio.Code.Engine" Value="${ENGINE}" />

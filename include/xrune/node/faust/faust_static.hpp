@@ -33,7 +33,7 @@
 // (the default C++ output is a `class synth : public dsp`, which is exactly
 // what this wrapper needs — no custom architecture file required).
 
-#include "faust_common.hpp"
+#include "xrune/node/faust/faust_common.hpp"
 #include <memory>
 
 namespace xrune {

@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "arena.hpp"
+#include "xrune/util/arena.hpp"
 #include "test_util.hpp"
 #include <cstdint>
 

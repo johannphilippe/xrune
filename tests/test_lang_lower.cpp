@@ -16,13 +16,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "galdr/compile.hpp"
-#include "offline_backend.hpp"
+#include "xrune/lang/compile.hpp"
+#include "xrune/audio/offline_backend.hpp"
 #include "test_util.hpp"
 #include <memory>
 
 using namespace xrune;
-using namespace xrune::galdr;
+using namespace xrune::lang;
 
 static constexpr double SINE_RMS = 0.70710678118654752440;
 static constexpr size_t SR = 48000, BS = 128;
@@ -190,7 +190,7 @@ int main() {
     XR_RUN("examples/drone.rune loads");
     {
         runtime rt; offline_backend* ob = make_rt(rt);
-        auto r = galdr::load_file(rt, std::string(XRUNE_SOURCE_DIR) + "/examples/drone.rune");
+        auto r = lang::load_file(rt, std::string(XRUNE_SOURCE_DIR) + "/examples/drone.rune");
         for (auto& d : r.diags) std::cerr << "  diag: " << d.format() << "\n";
         XR_CHECK(r.ok());
         blueprint_id id = r.find("drone");

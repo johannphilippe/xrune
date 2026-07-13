@@ -17,20 +17,20 @@
  */
 
 #pragma once
-#include "../core.hpp"
-#include "../standard_nodes.hpp"
-#include "../node/fft.hpp"
+#include "xrune/core.hpp"
+#include "xrune/node/standard_nodes.hpp"
+#include "xrune/node/fft.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <functional>
 #include <memory>
 
-// Galdr node registry (spec §14): maps DSL type names -> node factories, so the
+// Xrune node registry (spec §14): maps DSL type names -> node factories, so the
 // compiler can instantiate nodes by name. Also the extension point for plugin /
 // host nodes (register a name, get a DSL word). Isolated from the engine.
 
-namespace xrune::galdr {
+namespace xrune::lang {
 
 // A resolved argument value from a node call (numbers after compile-time
 // arithmetic, strings, or booleans).
@@ -127,4 +127,4 @@ inline node_registry standard_registry() {
     return r;
 }
 
-} // namespace xrune::galdr
+} // namespace xrune::lang

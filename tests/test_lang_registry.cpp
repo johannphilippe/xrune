@@ -16,12 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "galdr/node_registry.hpp"
+#include "xrune/lang/node_registry.hpp"
 #include "test_util.hpp"
 #include <memory>
 
 using namespace xrune;
-using namespace xrune::galdr;
+using namespace xrune::lang;
 
 static node_args named(const std::string& n, double v) {
     node_args a; a.named.push_back({n, arg_value(v)}); return a;

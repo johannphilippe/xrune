@@ -17,16 +17,16 @@
  */
 
 #pragma once
-#include "token.hpp"
+#include "xrune/lang/parser/token.hpp"
 #include <string>
 #include <vector>
 #include <memory>
 
-// Galdr abstract syntax tree — the parser's output. Purely syntactic: kind
+// Xrune abstract syntax tree — the parser's output. Purely syntactic: kind
 // resolution (number vs node vs fragment), arity, and desugaring happen in
 // later passes (sema/codegen), not here.
 
-namespace xrune::galdr {
+namespace xrune::lang {
 
 struct expr;
 using expr_ptr = std::unique_ptr<expr>;
@@ -209,4 +209,4 @@ inline std::string dump(const program& p) {
     return out;
 }
 
-} // namespace xrune::galdr
+} // namespace xrune::lang

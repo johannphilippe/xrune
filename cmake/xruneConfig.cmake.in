@@ -1,0 +1,39 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Threads)
+
+# readerwriterqueue is vendored via FetchContent, but it does install its own
+# CMake package config, so this resolves against our prefix.
+find_dependency(readerwriterqueue)
+
+# RtAudio is vendored too, but installs NO CMake package config — only
+# librtaudio.a, its headers and a .pc file. Our export refers to
+# RtAudio::rtaudio, so recreate that imported target from what we installed, and
+# pull in the platform backends the static library needs (ALSA/JACK/Pulse on
+# Linux, CoreAudio on macOS).
+if(NOT TARGET RtAudio::rtaudio)
+    add_library(RtAudio::rtaudio STATIC IMPORTED)
+    set_target_properties(RtAudio::rtaudio PROPERTIES
+        IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/librtaudio.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@/rtaudio")
+
+    if(APPLE)
+        set_property(TARGET RtAudio::rtaudio APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+            "-framework CoreAudio" "-framework CoreFoundation")
+    elseif(UNIX)
+        foreach(_xrune_backend asound jack pulse pulse-simple)
+            find_library(_xrune_lib_${_xrune_backend} ${_xrune_backend})
+            if(_xrune_lib_${_xrune_backend})
+                set_property(TARGET RtAudio::rtaudio APPEND PROPERTY
+                    INTERFACE_LINK_LIBRARIES ${_xrune_lib_${_xrune_backend}})
+            endif()
+            unset(_xrune_lib_${_xrune_backend} CACHE)
+        endforeach()
+    endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/xruneTargets.cmake")
+
+check_required_components(xrune)

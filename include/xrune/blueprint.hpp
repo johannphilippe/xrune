@@ -17,7 +17,7 @@
  */
 
 #pragma once
-#include "core.hpp"
+#include "xrune/core.hpp"
 #include <vector>
 #include <memory>
 #include <utility>

@@ -24,7 +24,7 @@
 //
 //   auto n = std::make_unique<xrune::faust_jit>("process = _ * hslider(\"g\",1,0,2,0.01);");
 
-#include "faust_common.hpp"
+#include "xrune/node/faust/faust_common.hpp"
 #include <faust/dsp/llvm-dsp.h>
 #include <memory>
 #include <string>

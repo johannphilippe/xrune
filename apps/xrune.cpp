@@ -16,8 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "api.hpp"
-#include "standard_nodes.hpp"
+#include "xrune/api.hpp"
+#include "xrune/node/standard_nodes.hpp"
 #include <iostream>
 #include <thread>
 #include <chrono>

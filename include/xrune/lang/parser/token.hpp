@@ -19,9 +19,9 @@
 #pragma once
 #include <string>
 
-// Galdr lexical tokens. See dev/dsl_specification.md §2 and Appendix A.
+// Xrune lexical tokens. See dev/language_specification.md §2 and Appendix A.
 
-namespace xrune::galdr {
+namespace xrune::lang {
 
 enum class Tok {
     End,        // end of input
@@ -115,4 +115,4 @@ inline bool continues_line(Tok k) {
     }
 }
 
-} // namespace xrune::galdr
+} // namespace xrune::lang

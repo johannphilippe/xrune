@@ -1,7 +1,6 @@
-# Editor support for Galdr
+# Editor support for Xrune
 
-Syntax highlighting for `.rune` files — the Galdr audio-graph DSL of
-[Xrune](../README.md).
+Syntax highlighting for `.rune` files — the [Xrune](../README.md) language.
 
 | Editor | Install |
 |---|---|

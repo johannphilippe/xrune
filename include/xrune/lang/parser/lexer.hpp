@@ -17,18 +17,18 @@
  */
 
 #pragma once
-#include "token.hpp"
-#include "diagnostic.hpp"
+#include "xrune/lang/parser/token.hpp"
+#include "xrune/lang/parser/diagnostic.hpp"
 #include <string>
 #include <vector>
 #include <cstdlib>
 #include <cctype>
 
-// Hand-written lexer for Galdr. Longest-match; tracks line/col; emits Newline
+// Hand-written lexer for Xrune. Longest-match; tracks line/col; emits Newline
 // tokens only where they terminate a statement (suppressed inside ()/[] and
 // after a continuation operator, spec §2).
 
-namespace xrune::galdr {
+namespace xrune::lang {
 
 struct lexer {
     const std::string& src;
@@ -198,4 +198,4 @@ inline std::vector<Token> lex(const std::string& src, diagnostics& diags) {
     return lexer(src, diags).run();
 }
 
-} // namespace xrune::galdr
+} // namespace xrune::lang

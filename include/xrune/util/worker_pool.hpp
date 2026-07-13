@@ -17,7 +17,7 @@
  */
 
 #pragma once
-#include "mpmc_queue.hpp"
+#include "xrune/util/mpmc_queue.hpp"
 #include <thread>
 #include <atomic>
 #include <vector>

@@ -16,12 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "core.hpp"
-#include "standard_nodes.hpp"
-#include "node/fft.hpp"
-#include "blueprint.hpp"
-#include "schedule.hpp"
-#include "instance.hpp"
+#include "xrune/core.hpp"
+#include "xrune/node/standard_nodes.hpp"
+#include "xrune/node/fft.hpp"
+#include "xrune/blueprint.hpp"
+#include "xrune/schedule.hpp"
+#include "xrune/instance.hpp"
 #include "test_util.hpp"
 #include <memory>
 #include <vector>

@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-namespace xrune::galdr {
+namespace xrune::lang {
 
 // A compile-time error/warning with a source position (spec §12).
 struct diagnostic {
@@ -35,4 +35,4 @@ struct diagnostic {
 
 using diagnostics = std::vector<diagnostic>;
 
-} // namespace xrune::galdr
+} // namespace xrune::lang

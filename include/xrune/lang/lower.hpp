@@ -17,24 +17,24 @@
  */
 
 #pragma once
-#include "../blueprint.hpp"
-#include "node_registry.hpp"
-#include "parser/ast.hpp"
-#include "parser/diagnostic.hpp"
+#include "xrune/blueprint.hpp"
+#include "xrune/lang/node_registry.hpp"
+#include "xrune/lang/parser/ast.hpp"
+#include "xrune/lang/parser/diagnostic.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
 #include <cmath>
 
-// Galdr semantic analysis + lowering: AST -> graph_blueprint. Each expression
+// Xrune lang semantic analysis + lowering: AST -> graph_blueprint. Each expression
 // evaluates to a `value`, either a compile-time number or a `fragment` (a
 // sub-graph with open input ports and output channels, à la Faust block
 // diagrams). The connection algebra composes fragments with strict arity;
 // sigils/rune-params expand at compile time. Output is a graph_blueprint per
 // rune, ready for runtime::register_blueprint.
 
-namespace xrune::galdr {
+namespace xrune::lang {
 
 // An output channel or an input port of some node in the blueprint.
 struct chan { size_t node = 0; size_t ch = 0; };
@@ -66,7 +66,7 @@ struct lower_result {
 
 using env_t = std::unordered_map<std::string, value>;
 
-struct galdr_abort {}; // internal: abort the current rune
+struct lang_abort {}; // internal: abort the current rune
 
 struct lowerer {
     const node_registry& reg;
@@ -85,7 +85,7 @@ struct lowerer {
 
     [[noreturn]] void fail(int line, int col, const std::string& m) {
         diags.push_back({m, line, col});
-        throw galdr_abort{};
+        throw lang_abort{};
     }
 
     std::string qualify(const std::string& n) const { return prefix.empty() ? n : prefix + "." + n; }
@@ -447,11 +447,11 @@ inline lower_result lower(const program& prog, const node_registry& reg) {
         try {
             L.lower_rune(r);
             res.blueprints.push_back(std::move(lb));
-        } catch (const galdr_abort&) {
+        } catch (const lang_abort&) {
             // diagnostic already recorded; skip this rune
         }
     }
     return res;
 }
 
-} // namespace xrune::galdr
+} // namespace xrune::lang

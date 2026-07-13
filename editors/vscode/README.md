@@ -1,12 +1,11 @@
-# Galdr — VS Code support
+# Xrune — VS Code support
 
-Syntax highlighting for Galdr (`.rune`), the audio-graph DSL of
-[Xrune](../../README.md).
+Syntax highlighting for the [Xrune](../../README.md) language (`.rune` files).
 
 ## Build & install
 
 ```bash
-./build_vsix.sh             # -> galdr-lang-0.1.0.vsix
+./build_vsix.sh             # -> xrune-lang-0.1.0.vsix
 ./build_vsix.sh --install   # build, then install into VS Code
 ./build_vsix.sh --clean     # remove built .vsix files
 ```
@@ -14,12 +13,12 @@ Syntax highlighting for Galdr (`.rune`), the audio-graph DSL of
 A `.vsix` is only a ZIP with a particular layout, so the script needs **no npm,
 no node and no vsce** — just `zip`. It writes the `extension.vsixmanifest` and
 `[Content_Types].xml` itself and reads the version straight from
-`galdr-lang/package.json`.
+`xrune-lang/package.json`.
 
 Install by hand instead, if you prefer:
 
 ```bash
-code --install-extension galdr-lang-0.1.0.vsix
+code --install-extension xrune-lang-0.1.0.vsix
 ```
 
 or in VS Code: **Extensions → ⋯ → Install from VSIX…**
@@ -30,10 +29,10 @@ Works with VS Code, VS Code Insiders and VSCodium (the script finds whichever
 ## Layout
 
 ```
-galdr-lang/
+xrune-lang/
   package.json                     extension manifest
   language-configuration.json      comments, brackets, indent, folding
-  syntaxes/galdr.tmLanguage.json   the TextMate grammar
+  syntaxes/xrune.tmLanguage.json   the TextMate grammar
 build_vsix.sh                      packager
 ```
 
@@ -53,20 +52,20 @@ Themeable via `editor.tokenColorCustomizations`:
 
 | Element | Scope |
 |---|---|
-| `rune` `sigil` `end` … | `keyword.control.galdr` |
-| node names | `support.class.node.galdr` |
-| `over` / `finer` | `support.function.combinator.galdr` |
-| `:>` merge | `keyword.operator.merge.galdr` |
-| `<:` split | `keyword.operator.split.galdr` |
-| `~>` modulate | `keyword.operator.modulate.galdr` |
-| `->` wire | `keyword.operator.wire.galdr` |
-| port after `.` | `variable.other.property.galdr` |
-| rune/sigil name | `entity.name.function.galdr` |
+| `rune` `sigil` `end` … | `keyword.control.xrune` |
+| node names | `support.class.node.xrune` |
+| `over` / `finer` | `support.function.combinator.xrune` |
+| `:>` merge | `keyword.operator.merge.xrune` |
+| `<:` split | `keyword.operator.split.xrune` |
+| `~>` modulate | `keyword.operator.modulate.xrune` |
+| `->` wire | `keyword.operator.wire.xrune` |
+| port after `.` | `variable.other.property.xrune` |
+| rune/sigil name | `entity.name.function.xrune` |
 
 ```jsonc
 "editor.tokenColorCustomizations": {
   "textMateRules": [
-    { "scope": "keyword.operator.modulate.galdr",
+    { "scope": "keyword.operator.modulate.xrune",
       "settings": { "foreground": "#b8bb26", "fontStyle": "bold" } }
   ]
 }
@@ -74,5 +73,5 @@ Themeable via `editor.tokenColorCustomizations`:
 
 ## Bumping the version
 
-Edit `version` in `galdr-lang/package.json` and re-run `./build_vsix.sh`; the
+Edit `version` in `xrune-lang/package.json` and re-run `./build_vsix.sh`; the
 output filename follows it automatically.

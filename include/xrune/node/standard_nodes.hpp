@@ -17,8 +17,8 @@
  */
 
 #pragma once
-#include "core.hpp"
-#include "node/multirate.hpp"   // upsampler2, downsampler2, downbloc, halfband
+#include "xrune/core.hpp"
+#include "xrune/node/multirate.hpp"   // upsampler2, downsampler2, downbloc, halfband
 #include <cmath>
 #include <algorithm>
 #include <cstdint>

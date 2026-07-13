@@ -16,11 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "galdr/parser/parser.hpp"
+#include "xrune/lang/parser/parser.hpp"
 #include "test_util.hpp"
 #include <string>
 
-using namespace xrune::galdr;
+using namespace xrune::lang;
 
 static std::string expr_of_out(const rune_def& r, size_t idx) {
     std::string s;

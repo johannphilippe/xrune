@@ -17,19 +17,19 @@
  */
 
 #pragma once
-#include "token.hpp"
-#include "lexer.hpp"
-#include "ast.hpp"
-#include "diagnostic.hpp"
+#include "xrune/lang/parser/token.hpp"
+#include "xrune/lang/parser/lexer.hpp"
+#include "xrune/lang/parser/ast.hpp"
+#include "xrune/lang/parser/diagnostic.hpp"
 #include <string>
 #include <vector>
 #include <memory>
 
-// Recursive-descent + precedence-climbing parser for Galdr (spec Appendix A).
+// Recursive-descent + precedence-climbing parser for Xrune (spec Appendix A).
 // Produces an AST and a list of diagnostics; recovers at statement / definition
 // boundaries so one error does not abort the whole file.
 
-namespace xrune::galdr {
+namespace xrune::lang {
 
 struct parse_result {
     program prog;
@@ -344,4 +344,4 @@ inline parse_result parse(const std::string& src) {
     return r;
 }
 
-} // namespace xrune::galdr
+} // namespace xrune::lang
