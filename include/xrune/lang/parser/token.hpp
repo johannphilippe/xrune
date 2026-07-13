@@ -51,6 +51,7 @@ enum class Tok {
     // arithmetic (compile-time, on numbers)
     Plus, Minus, Star, Slash, Percent,
 
+    Bang,       // !   cut: discard a channel
     Tilde,      // ~   reserved (feedback), currently an error
     Unknown,
 };
@@ -95,6 +96,7 @@ inline const char* tok_name(Tok k) {
         case Tok::Star: return "'*'";
         case Tok::Slash: return "'/'";
         case Tok::Percent: return "'%'";
+        case Tok::Bang: return "'!'";
         case Tok::Tilde: return "'~'";
         default: return "unknown token";
     }

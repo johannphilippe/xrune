@@ -137,6 +137,7 @@ private:
             case '*': advance(); return make(Tok::Star, l, c);
             case '/': advance(); return make(Tok::Slash, l, c);
             case '%': advance(); return make(Tok::Percent, l, c);
+            case '!': advance(); return make(Tok::Bang, l, c);
         }
 
         advance();

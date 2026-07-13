@@ -1,0 +1,31 @@
+// mod_drone.rune — a detuned drone whose third pair is vibrato'd by an LFO.
+// Run: xrune examples/mod_drone.rune
+//
+// Shows the three features that make modulation readable:
+//   signal arithmetic   base * 3 + lfo * 30
+//   constant coercion   a bare number in signal position is a DC signal
+//   the `_` wire        `:> _` sums channels down to one, with no node in the way
+
+sigil detuned(f, spread)
+  // Name the nodes. A sigil's anonymous nodes get generated names (det.sine#1)
+  // containing '#', which is not a legal identifier — so they can never be named
+  // by `~>`. Naming them here makes them reachable as `det.a` / `det.b`.
+  a = sine(freq = f)
+  b = sine(freq = f * (1 + spread))
+  a , b
+end
+
+rune drone(base = 110)
+  low  = detuned(base, 0.006) :> gain(0.12)
+  high = detuned(base * 2, 0.01) :> gain(0.06)
+  det  = detuned(base * 3, 0.008) * 0.06
+
+  // A signal connected to a port REPLACES its value — it is not added to it.
+  // So the centre frequency must be part of the modulating signal itself; the
+  // node's own `freq` argument is discarded the moment the port is driven.
+  lfo = sine(freq = 0.5)
+  (base * 3 + lfo * 30) ~> det.a.freq
+
+  // Sum the three pairs to one channel, then fan out to stereo.
+  out (low , high , det) :> _ : m2s
+end

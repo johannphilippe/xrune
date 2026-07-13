@@ -342,7 +342,7 @@ auto r = lang::load_file(rt, "examples/drone.rune");   // parse + lower + regist
 A **rune** is a blueprint. A **sigil** is a reusable fragment — expanded at
 compile time, so it costs nothing at run time.
 
-```rune
+``` xrune
 sigil detuned(f, spread)
   sine(freq = f) , sine(freq = f * (1 + spread))
 end
@@ -376,6 +376,51 @@ Four operators, Faust's. **`,` binds tightest; `:>` loosest.**
 
 So `sine , sine :> gain` parses as `(sine , sine) :> gain` — two oscillators
 summed into one gain. Arity mismatches are compile errors, not silent surprises.
+
+### Arithmetic on signals
+
+`+ - * /` work on signals as well as on compile-time numbers. The **operator**
+picks the operation; the **kinds of the operands** pick the lowering:
+
+```rune
+sine * 0.5            // scale     -> gain(0.5)
+0.5 * sine            // same, commutative
+sine(220) + sine(330) // sum       -> add
+a - b                 // subtract  -> add + inv
+a / b                 // divide    -> div  (a/0 yields 0, never NaN)
+-sine                 // negate    -> inv
+```
+
+A **bare number in signal position becomes a constant (DC) signal**, so `1 - env`
+and `(sine , 0.5) :> mul` just work.
+
+Signal ops are **element-wise across channels**, and a mono operand **broadcasts**:
+`(l , r) * 0.5` scales both. Mismatched channel counts are a compile error. (This
+is a deliberate divergence from Faust, where `A + B` means `(A,B) : +` and does not
+broadcast.)
+
+`%` stays compile-time only — there is no modulo node.
+
+Arithmetic binds **tighter** than the connection algebra (`*` > `+` > `,` > `:`),
+so `sine , sine * 0.5` is `sine , (sine * 0.5)`.
+
+This is what makes modulation readable. A signal connected to a port *replaces*
+its value rather than offsetting it, so the centre value has to be part of the
+modulating signal:
+
+```rune
+(330 + lfo * 4) ~> osc.freq     // vibrato around 330 Hz
+```
+
+### The `_` and `!` wires
+
+```rune
+a , b , c , d :> _     // `_` is the identity wire: sums everything to one channel
+sine : _ : gain(0.5)   // ... and is a no-op in sequence
+(l , r) : (_ , !)      // `!` discards a channel — here, keep left, drop right
+```
+
+`_` lowers to a pass-through node, so it costs one buffer copy today.
 
 ### Modulation and explicit wiring
 
@@ -446,11 +491,11 @@ your own with `registry.add(name, factory)` and it becomes a language word
 |---|---|
 | **sources** | `sine(freq)` · `noise` · `constant(value)` |
 | **level** | `gain(gain)` · `fader(volume)` · `pan(pan)` · `inv` · `sinv` |
-| **mixing** | `mix(inputs)` · `smix(inputs)` · `add` · `mul` · `adapt(inputs, outputs)` |
+| **mixing** | `mix(inputs)` · `smix(inputs)` · `add` · `mul` · `div` · `adapt(inputs, outputs)` |
 | **channels** | `m2s` · `s2m` · `bus(channels)` |
 | **multi-rate** | `up2` · `down2` · `downbloc` |
 | **spectral** | `stft(size)` · `stft_fwd(size, channels)` · `stft_bwd(size, channels)` |
-| **misc** | `sah(rate)` · `counter` |
+| **misc** | `sah(rate)` · `counter` · `cut` (the `!` wire) |
 
 ---
 

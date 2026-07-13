@@ -310,6 +310,33 @@ struct add : node {
     }
 };
 
+// ============================================================================
+// DIVIDE  (a / b; stateless, no ports)
+// Division by zero yields 0 rather than a NaN: one NaN in an audio graph
+// propagates to every downstream sample of that voice, for the rest of its life.
+// ============================================================================
+struct divide : node {
+    const char* type_name() const override { return "div"; }
+    size_t inputs_count() const override { return 2; }
+    size_t outputs_count() const override { return 1; }
+    void process(void*, const node_processing_context& ctx) const override {
+        for (size_t i = 0; i < ctx.block_size; ++i) {
+            const sample_t d = ctx.inputs[1][i];
+            ctx.outputs[0][i] = (d == 0.0) ? 0.0 : ctx.inputs[0][i] / d;
+        }
+    }
+};
+
+// ============================================================================
+// CUT  (the language's `!`): consumes a channel and produces nothing.
+// ============================================================================
+struct cut : node {
+    const char* type_name() const override { return "cut"; }
+    size_t inputs_count() const override { return 1; }
+    size_t outputs_count() const override { return 0; }
+    void process(void*, const node_processing_context&) const override {}
+};
+
 struct multiply : node {
     const char* type_name() const override { return "mul"; }
     size_t inputs_count() const override { return 2; }

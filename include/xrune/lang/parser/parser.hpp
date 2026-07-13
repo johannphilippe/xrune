@@ -265,6 +265,15 @@ struct parser {
 
     expr_ptr parse_primary(bool /*in_args*/) {
         int l = cur().line, c = cur().col;
+        // `!` (cut) is a primary, like `_`. It cannot collide with an identifier
+        // because '!' is not a legal identifier character, so we reuse the ident
+        // node with the text "!" and let the lowering resolve it.
+        if (at(Tok::Bang)) {
+            adv();
+            auto n = std::make_unique<expr>(expr::kind::ident);
+            n->line = l; n->col = c; n->text = "!";
+            return n;
+        }
         if (accept(Tok::LParen)) {
             expr_ptr e = parse_binary(1, false); // grouping: comma is parallel
             expect(Tok::RParen, "')'");

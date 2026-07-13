@@ -208,7 +208,15 @@ int main() {
         XR_CHECK(!load(rt, "rune a\n  out nope()\nend\n").ok());        // unknown node
         XR_CHECK(!load(rt, "rune a\n  out sine(440) : add\nend\n").ok()); // ':' arity 1 vs 2
         XR_CHECK(!load(rt, "rune a\n  x = gain(1.0)\nend\n").ok());       // no 'out'
-        XR_CHECK(!load(rt, "rune a\n  out 0.5 : gain(1)\nend\n").ok());   // kind: number in wiring
+
+        // `out 0.5 : gain(1)` USED to be an error ("number in wiring"). A number
+        // in signal position is now coerced to a constant signal, so it is legal.
+        XR_CHECK(load(rt, "rune a\n  out 0.5 : gain(1)\nend\n").ok());
+
+        // The coercion does not swallow real mistakes: a number on the RIGHT of
+        // ':' becomes a `constant`, which has zero inputs, so the arity check
+        // still catches it — one step later, but it still catches it.
+        XR_CHECK(!load(rt, "rune a\n  out sine : 0.5\nend\n").ok());
     }
 
     XR_MAIN_REPORT();

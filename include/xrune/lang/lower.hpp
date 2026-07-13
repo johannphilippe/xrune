@@ -111,6 +111,70 @@ struct lowerer {
             fail(line, col, "connection rejected: input already driven or channel out of range");
     }
 
+    // ---- builtin node makers (signal arithmetic, `_`, `!`) ----
+
+    size_t make_wire()  { return add(reg.make("adapt", one_one()), gen("wire")); }
+    size_t make_cut()   { return add(reg.make("cut", {}), gen("cut")); }
+    size_t make_const(double v) { return add(reg.make("constant", named("value", v)), gen("const")); }
+    size_t make_gain(double v)  { return add(reg.make("gain", named("gain", v)), gen("gain")); }
+    size_t make_op(const char* type) { return add(reg.make(type, {}), gen(type)); }
+
+    static node_args named(const char* k, double v) {
+        node_args a; a.named.emplace_back(k, arg_value(v)); return a;
+    }
+    static node_args one_one() {
+        node_args a;
+        a.named.emplace_back("inputs", arg_value(1.0));
+        a.named.emplace_back("outputs", arg_value(1.0));
+        return a;
+    }
+
+    // sig * k  ->  one gain(k) per channel. Deliberately NOT mul+constant: one
+    // node instead of two, and the `gain` port stays addressable, so a literal
+    // scale factor remains automatable/modulatable later.
+    fragment scale(fragment a, double k, const expr& e) {
+        fragment out; out.ins = a.ins;
+        for (chan c : a.outs) {
+            size_t g = make_gain(k);
+            wire(c, {g, 0}, e.line, e.col);
+            out.outs.push_back({g, 0});
+        }
+        return out;
+    }
+
+    // Element-wise binary op across channels, broadcasting a mono operand.
+    // (This is where Xrune diverges from Faust, which would require the operand
+    // arities to feed a 2-input primitive exactly. Broadcasting makes stereo
+    // work without ceremony; see dev/language_improvements.md.)
+    fragment zip(const char* type, fragment a, fragment b, const expr& e) {
+        const size_t na = a.outs.size(), nb = b.outs.size();
+        if (na != nb && na != 1 && nb != 1)
+            fail(e.line, e.col, "arithmetic arity: cannot combine " + std::to_string(na) +
+                                " and " + std::to_string(nb) + " channels");
+        const size_t n = (na > nb) ? na : nb;
+        fragment out;
+        out.ins = a.ins;
+        out.ins.insert(out.ins.end(), b.ins.begin(), b.ins.end());
+        for (size_t i = 0; i < n; ++i) {
+            size_t op = make_op(type);
+            wire(a.outs[na == 1 ? 0 : i], {op, 0}, e.line, e.col);
+            wire(b.outs[nb == 1 ? 0 : i], {op, 1}, e.line, e.col);
+            out.outs.push_back({op, 0});
+        }
+        return out;
+    }
+
+    // -sig  ->  inv per channel (used by unary minus and by `a - b`).
+    fragment negate(fragment a, const expr& e) {
+        fragment out; out.ins = a.ins;
+        for (chan c : a.outs) {
+            size_t v = make_op("inv");
+            wire(c, {v, 0}, e.line, e.col);
+            out.outs.push_back({v, 0});
+        }
+        return out;
+    }
+
     // ---- lowering entry ----
     void lower_rune(const rune_def& r) {
         prefix.clear();
@@ -234,6 +298,14 @@ struct lowerer {
             case expr::kind::ident: {
                 auto it = env.find(e.text);
                 if (it != env.end()) return it->second;
+                // `_` is the identity wire and `!` discards a channel. Both are
+                // lowered to a node (adapt(1,1) / cut) so they behave correctly
+                // in EVERY position — including `_ , _ : add`, where a bare wire
+                // has an open input that the {node,channel} fragment model can
+                // only express as a node. The redundant adapt(1,1) is a peephole
+                // candidate for compile(), not a semantic problem.
+                if (e.text == "_") return value::block(node_fragment(make_wire()));
+                if (e.text == "!") return value::block(node_fragment(make_cut()));
                 // A bare name that is a registered node type instantiates with
                 // defaults (Faust-style: `a : m2s`, `x :> add`).
                 if (reg.has(e.text)) {
@@ -242,8 +314,11 @@ struct lowerer {
                 }
                 fail(e.line, e.col, "unknown name '" + e.text + "'");
             }
-            case expr::kind::unary:
-                return value::num(-eval_number(*e.a, env));
+            case expr::kind::unary: {
+                value v = eval_expr(*e.a, env);
+                if (v.is_number) return value::num(-v.number);
+                return value::block(negate(std::move(v.frag), e));   // -sig -> inv
+            }
             case expr::kind::select: {
                 fragment f = eval_fragment(*e.a, env);
                 if (static_cast<size_t>(e.index) >= f.outs.size())
@@ -258,25 +333,89 @@ struct lowerer {
         return value::num(0);
     }
 
+    // Arithmetic. The OPERATOR picks the operation; the KINDS of the operands
+    // pick the lowering:
+    //
+    //   num . num   compile-time fold (unchanged)
+    //   sig * num   gain(num) per channel          num * sig  same
+    //   sig / num   gain(1/num)  (reciprocal folded at compile time)
+    //   sig + num   add + constant per channel     num + sig  same
+    //   sig - num   add + constant(-num)           num - sig  constant + inv
+    //   sig . sig   element-wise per channel, mono operand broadcast
+    //
+    // `%` stays compile-time only: there is no modulo node, and a per-sample
+    // modulo is not something anyone has asked the audio graph for.
+    value eval_arith(const expr& e, env_t& env) {
+        value l = eval_expr(*e.a, env);
+        value r = eval_expr(*e.b, env);
+
+        // Both numbers: fold, exactly as before.
+        if (l.is_number && r.is_number) {
+            const double a = l.number, b = r.number;
+            switch (e.op) {
+                case Tok::Plus:  return value::num(a + b);
+                case Tok::Minus: return value::num(a - b);
+                case Tok::Star:  return value::num(a * b);
+                case Tok::Slash:
+                    if (b == 0.0) fail(e.line, e.col, "division by zero");
+                    return value::num(a / b);
+                case Tok::Percent:
+                    if (b == 0.0) fail(e.line, e.col, "modulo by zero");
+                    return value::num(std::fmod(a, b));
+                default: break;
+            }
+            return value::num(0);
+        }
+
+        if (e.op == Tok::Percent)
+            fail(e.line, e.col, "'%' is compile-time only; it does not apply to signals");
+
+        // At least one side is a signal.
+        switch (e.op) {
+            case Tok::Star:
+                if (r.is_number) return value::block(scale(std::move(l.frag), r.number, e));
+                if (l.is_number) return value::block(scale(std::move(r.frag), l.number, e));
+                return value::block(zip("mul", std::move(l.frag), std::move(r.frag), e));
+
+            case Tok::Slash:
+                if (r.is_number) {
+                    if (r.number == 0.0) fail(e.line, e.col, "division by zero");
+                    return value::block(scale(std::move(l.frag), 1.0 / r.number, e));  // reciprocal
+                }
+                // num / sig, or sig / sig -> the div node (which yields 0 on /0).
+                return value::block(zip("div", to_frag(std::move(l), e), std::move(r.frag), e));
+
+            case Tok::Plus:
+                return value::block(zip("add", to_frag(std::move(l), e), to_frag(std::move(r), e), e));
+
+            case Tok::Minus: {
+                // a - b  ==  a + (-b). No `sub` node needed: `inv` already exists.
+                fragment a = to_frag(std::move(l), e);
+                if (r.is_number) {
+                    fragment k = node_fragment(make_const(-r.number));
+                    return value::block(zip("add", std::move(a), std::move(k), e));
+                }
+                fragment b = negate(std::move(r.frag), e);
+                return value::block(zip("add", std::move(a), std::move(b), e));
+            }
+            default: break;
+        }
+        fail(e.line, e.col, "unsupported operator");
+        return value::num(0);
+    }
+
+    // A value in signal position: a number becomes a constant (DC) signal.
+    fragment to_frag(value v, const expr& e) {
+        (void)e;
+        if (v.is_number) return node_fragment(make_const(v.number));
+        return std::move(v.frag);
+    }
+
     value eval_binary(const expr& e, env_t& env) {
         switch (e.op) {
             case Tok::Plus: case Tok::Minus: case Tok::Star:
-            case Tok::Slash: case Tok::Percent: {
-                double l = eval_number(*e.a, env), r = eval_number(*e.b, env);
-                switch (e.op) {
-                    case Tok::Plus: return value::num(l + r);
-                    case Tok::Minus: return value::num(l - r);
-                    case Tok::Star: return value::num(l * r);
-                    case Tok::Slash:
-                        if (r == 0.0) fail(e.line, e.col, "division by zero");
-                        return value::num(l / r);
-                    case Tok::Percent:
-                        if (r == 0.0) fail(e.line, e.col, "modulo by zero");
-                        return value::num(std::fmod(l, r));
-                    default: break;
-                }
-                return value::num(0);
-            }
+            case Tok::Slash: case Tok::Percent:
+                return eval_arith(e, env);
             case Tok::Colon: return eval_seq(e, env);
             case Tok::Comma: return eval_par(e, env);
             case Tok::Split: return eval_split(e, env);
@@ -411,9 +550,14 @@ struct lowerer {
     }
 
     // ---- helpers ----
+    // A number used where a signal is expected becomes a constant (DC) signal.
+    // This is unambiguous because the number/signal distinction is POSITIONAL and
+    // already resolved: argument slots go through eval_number(), signal slots
+    // through here. Mistakes are still caught -- `sine : 0.5` coerces 0.5 to a
+    // `constant`, which has zero inputs, so ':' then fails on arity.
     fragment eval_fragment(const expr& e, env_t& env) {
         value v = eval_expr(e, env);
-        if (v.is_number) fail(e.line, e.col, "expected a signal here, got a number");
+        if (v.is_number) return node_fragment(make_const(v.number));
         return std::move(v.frag);
     }
     double eval_number(const expr& e, env_t& env) {

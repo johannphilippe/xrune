@@ -116,6 +116,8 @@ inline node_registry standard_registry() {
     r.add("counter",  [](const node_args&)  { return std::make_unique<call_counter>(); });
     r.add("add",      [](const node_args&)  { return std::make_unique<add>(); });
     r.add("mul",      [](const node_args&)  { return std::make_unique<multiply>(); });
+    r.add("div",      [](const node_args&)  { return std::make_unique<divide>(); });
+    r.add("cut",      [](const node_args&)  { return std::make_unique<cut>(); });
     r.add("sah",      [](const node_args& a){ return std::make_unique<sample_and_hold>(a.num("rate", 0, 1.0)); });
     r.add("bus",      [](const node_args& a){ return std::make_unique<bus_input>(a.count("channels", 0, 2)); }, {"channels"});
     r.add("up2",      [](const node_args&)  { return std::make_unique<upsampler2>(); });
