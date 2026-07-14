@@ -81,6 +81,11 @@ struct lowerer {
     std::string prefix;
     std::unordered_map<std::string, int> counters; // per-prefix anonymous counter
 
+    // Rune-parameter tracking, for promoting them to blueprint parameters.
+    std::unordered_set<std::string> rune_params;
+    std::unordered_map<std::string, size_t> uses;         // every evaluation
+    std::unordered_map<std::string, size_t> direct_uses;  // bound to a port
+
     lowerer(const node_registry& r, diagnostics& d) : reg(r), diags(d) {}
 
     [[noreturn]] void fail(int line, int col, const std::string& m) {
@@ -132,12 +137,26 @@ struct lowerer {
     // sig * k  ->  one gain(k) per channel. Deliberately NOT mul+constant: one
     // node instead of two, and the `gain` port stays addressable, so a literal
     // scale factor remains automatable/modulatable later.
-    fragment scale(fragment a, double k, const expr& e) {
+    fragment scale(fragment a, double k, const expr& e, const expr* scalar = nullptr) {
+        // If the scale factor is *exactly* a rune parameter (`osc * amp`), bind it
+        // to the gain port this creates. Without this, the most natural way to
+        // write a level control would silently produce an unaddressable node --
+        // the node-call binder never sees it, because arithmetic builds the gain
+        // itself rather than going through eval_call().
+        const bool bindable = scalar && scalar->k == expr::kind::ident &&
+                              rune_params.count(scalar->text) &&
+                              bp->find_rune_param(scalar->text) >= 0;
+
         fragment out; out.ins = a.ins;
         for (chan c : a.outs) {
             size_t g = make_gain(k);
             wire(c, {g, 0}, e.line, e.col);
             out.outs.push_back({g, 0});
+            if (bindable) {
+                const long pi = bp->find_rune_param(scalar->text);
+                bp->params[static_cast<size_t>(pi)].targets.push_back({g, 0});
+                ++direct_uses[scalar->text];
+            }
         }
         return out;
     }
@@ -182,15 +201,36 @@ struct lowerer {
         env_t env;
         std::unordered_set<std::string> defined;
 
+        rune_params.clear();
+        uses.clear();
+        direct_uses.clear();
+
         for (const auto& p : r.params) {
             if (!p.default_value)
                 fail(p.line, p.col, "rune parameter '" + p.name + "' needs a default value");
-            env[p.name] = value::num(eval_number(*p.default_value, env));
+            const double dv = eval_number(*p.default_value, env);
+            env[p.name] = value::num(dv);
             defined.insert(p.name);
+
+            rune_params.insert(p.name);
+            blueprint_param bp_param;
+            bp_param.name = p.name;
+            bp_param.default_value = dv;
+            bp->params.push_back(std::move(bp_param));
         }
 
         bool have_out = false;
         for (const auto& s : r.body) do_stmt(*s, env, defined, &have_out);
+
+        // A parameter used more times than it was bound directly to a port has
+        // at least one use that got folded into a constant (`f * 2`). That use
+        // cannot follow the parameter at run time, so flag it instead of letting
+        // the host discover the inconsistency by ear.
+        for (auto& bpp : bp->params) {
+            const size_t total  = uses.count(bpp.name)        ? uses[bpp.name]        : 0;
+            const size_t direct = direct_uses.count(bpp.name) ? direct_uses[bpp.name] : 0;
+            bpp.partial = (total > direct);
+        }
         if (!have_out) fail(r.line, r.col, "rune '" + r.name + "' has no 'out'");
     }
 
@@ -297,7 +337,10 @@ struct lowerer {
                 fail(e.line, e.col, "a string/boolean is only valid as a node argument");
             case expr::kind::ident: {
                 auto it = env.find(e.text);
-                if (it != env.end()) return it->second;
+                if (it != env.end()) {
+                    if (rune_params.count(e.text)) ++uses[e.text];
+                    return it->second;
+                }
                 // `_` is the identity wire and `!` discards a channel. Both are
                 // lowered to a node (adapt(1,1) / cut) so they behave correctly
                 // in EVERY position — including `_ , _ : add`, where a bare wire
@@ -373,8 +416,8 @@ struct lowerer {
         // At least one side is a signal.
         switch (e.op) {
             case Tok::Star:
-                if (r.is_number) return value::block(scale(std::move(l.frag), r.number, e));
-                if (l.is_number) return value::block(scale(std::move(r.frag), l.number, e));
+                if (r.is_number) return value::block(scale(std::move(l.frag), r.number, e, e.b.get()));
+                if (l.is_number) return value::block(scale(std::move(r.frag), l.number, e, e.a.get()));
                 return value::block(zip("mul", std::move(l.frag), std::move(r.frag), e));
 
             case Tok::Slash:
@@ -491,6 +534,7 @@ struct lowerer {
             std::unique_ptr<node> nd = reg.make(name, na);
             std::string nm = preferred.empty() ? gen(name) : preferred;
             size_t idx = add(std::move(nd), nm);
+            bind_rune_params(e.args, idx);
             return value::block(node_fragment(idx));
         }
         fail(e.line, e.col, "unknown node type or sigil '" + name + "'");
@@ -564,6 +608,42 @@ struct lowerer {
         value v = eval_expr(e, env);
         if (!v.is_number) fail(e.line, e.col, "expected a number here, got a signal");
         return v.number;
+    }
+
+    // An argument that is EXACTLY a rune parameter (`sine(freq = f)`, `gain(amp)`)
+    // binds that parameter to the port it fed, so the host can drive it later.
+    // Anything else (`f * 2`) is folded to a number and cannot be followed.
+    void bind_rune_params(const std::vector<argument>& args, size_t node_idx) {
+        if (bp->params.empty()) return;
+        const node* nd = bp->nodes[node_idx].get();
+
+        // A node with structural arguments (mixer inputs, fft size) has
+        // positional slots that are NOT ports, so positional binding is only
+        // safe when it reports none.
+        node_config_arg cfg[8];
+        const bool positional_is_port = (nd->config_args(cfg, 8) == 0);
+
+        size_t pos = 0;
+        for (const auto& a : args) {
+            const bool is_named = !a.name.empty();
+            const size_t this_pos = is_named ? 0 : pos++;
+            if (!a.value || a.value->k != expr::kind::ident) continue;
+            const std::string& pname = a.value->text;
+            const long pi_bp = bp->find_rune_param(pname);
+            if (pi_bp < 0) continue;                       // not a rune parameter
+
+            long port = -1;
+            if (is_named) {
+                port = bp->find_param(node_idx, a.name);   // freq = f
+            } else if (positional_is_port && this_pos < nd->params_count()) {
+                port = static_cast<long>(this_pos);        // gain(amp)
+            }
+            if (port < 0) continue;
+
+            bp->params[static_cast<size_t>(pi_bp)].targets.push_back(
+                {node_idx, static_cast<size_t>(port)});
+            ++direct_uses[pname];
+        }
     }
 
     node_args eval_node_args(const std::vector<argument>& args, env_t& env) {

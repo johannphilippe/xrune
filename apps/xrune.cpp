@@ -229,6 +229,14 @@ int main(int argc, char** argv) {
             std::cout << "  " << entry.first << "  ("
                       << bi->nodes.size() << " nodes, "
                       << bi->output_terminals.size() << " output terminal(s))\n";
+            for (const rune_param_info& pi : bi->params) {
+                std::cout << "      " << pi.name << " = " << pi.default_value;
+                if (pi.targets == 0)
+                    std::cout << "   [drives no port: folded into an expression]";
+                else if (pi.partial)
+                    std::cout << "   [partial: also folded into an expression]";
+                std::cout << "\n";
+            }
         }
         return 0;
     }

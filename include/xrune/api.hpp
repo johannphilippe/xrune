@@ -85,9 +85,26 @@ struct node_info {
     size_t outputs = 0;
     std::vector<port_info> ports;
 };
+// A rune parameter, as the host sees it: the name the user actually WROTE
+// (`tone.f`), not the node the value happened to be folded into.
+//
+// `partial` is the honest caveat. A rune parameter is compile-time: it can only
+// follow the ports it was passed to *directly* (`sine(freq = f)`). If it was also
+// used inside an expression (`sine(freq = f * 2)`), that use was folded to a
+// constant and CANNOT follow the parameter at run time. partial == true says so,
+// instead of letting a host discover the inconsistency by ear.
+// `targets == 0` means the parameter drives nothing at all.
+struct rune_param_info {
+    std::string name;
+    sample_t default_value = 0.0;
+    size_t targets = 0;      // how many ports it drives
+    bool partial = false;    // also used inside an expression (folded)
+};
+
 struct blueprint_info {
     std::string name;
     std::vector<node_info> nodes;
+    std::vector<rune_param_info> params;   // the rune's own parameters
     std::vector<std::string> input_terminals;
     std::vector<std::string> output_terminals;
 };
@@ -155,6 +172,12 @@ struct spawn_options {
     voice into = no_voice;               // invalid -> route to master
     std::string into_terminal = "in";    // destination input terminal (by name)
     std::string from_terminal = "out";   // this voice's output terminal (by name)
+
+    // Rune-parameter values for THIS voice, applied before it runs. Use these to
+    // spawn a note at a pitch: the voice starts AT the value. Setting the port
+    // after spawn instead would ramp from the compiled default over the first
+    // block -- correct smoothing for a live change, but a chirp on a note-on.
+    std::vector<std::pair<std::string, sample_t>> params;
 };
 
 struct runtime {
@@ -222,6 +245,11 @@ struct runtime {
     param_ref resolve(blueprint_id id, const std::string& node, const std::string& port);
     bool set(const voice& v, param_ref p, sample_t value);
     bool set(const voice& v, const std::string& node, const std::string& port, sample_t value);
+
+    // Set a RUNE parameter by the name the user wrote (`rt.set_param(v, "f", 440)`).
+    // Fans out to every port that parameter drives. Fails if the name is unknown
+    // or drives nothing. Smoothed, like any other control-rate change.
+    bool set_param(const voice& v, const std::string& name, sample_t value);
 
     // ---- Routing (runtime rewiring; spawn already routes once) ----
 

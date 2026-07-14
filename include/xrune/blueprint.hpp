@@ -49,6 +49,29 @@ struct terminal {
     size_t node = 0;
 };
 
+// One port a rune parameter drives.
+struct param_target {
+    size_t node = 0;
+    size_t port = 0;
+};
+
+// A rune parameter promoted to a *blueprint* parameter, so a host (Idyl) can
+// address `tone.f` — the name the user actually wrote — instead of reverse-
+// engineering which node the value was folded into.
+//
+// A rune parameter is a COMPILE-TIME value: `sine(freq = f)` bakes f into the
+// port's default. We therefore only bind a parameter to a port when it is used
+// *directly* as an argument. If it also appears inside an expression
+// (`sine(freq = f * 2)`), that use is folded to a constant and cannot follow the
+// parameter at run time — `partial` records exactly that, so the host is told
+// rather than silently surprised.
+struct blueprint_param {
+    std::string name;
+    sample_t default_value = 0.0;
+    std::vector<param_target> targets;  // ports this parameter drives
+    bool partial = false;               // also used inside an expression
+};
+
 // Immutable topology description (pre_roadmap §2). Owns its node *types*
 // (stateless code + default params); many instances share one blueprint.
 // Nodes are referenced by index returned from add().
@@ -59,8 +82,16 @@ struct graph_blueprint {
     std::vector<param_connection> param_connections;
     std::vector<terminal> input_terminals;
     std::vector<terminal> output_terminals;
+    std::vector<blueprint_param> params;   // rune parameters, addressable by name
     long input_node = -1;
     long output_node = -1;
+
+    // Index of a blueprint parameter by name, or -1.
+    long find_rune_param(const std::string& name) const {
+        for (size_t i = 0; i < params.size(); ++i)
+            if (params[i].name == name) return static_cast<long>(i);
+        return -1;
+    }
 
     template <typename T, typename... Args>
     size_t add(Args&&... args) {

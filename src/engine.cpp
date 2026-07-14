@@ -90,10 +90,21 @@ void engine::stop() {
 }
 
 instance_handle engine::spawn(const compiled_schedule& sched, lifetime_policy life ,
-                          route_target dest , size_t src_terminal ) {
+                          route_target dest , size_t src_terminal ,
+                          const std::vector<initial_param>* init ) {
     reclaim();
     instance_handle h = mgr.create(sched, sample_rate, life);
     if (!h.valid()) return null_handle;
+
+    // The instance exists but is not active yet, and we are on the control
+    // thread -- so we can write its ports directly. init_parameter() sets
+    // current AND target, so there is no glide from the compiled default.
+    if (init && !init->empty()) {
+        if (graph_instance* g = mgr.instance_at(h.slot))
+            for (const initial_param& ip : *init)
+                g->init_parameter(ip.node, ip.param, ip.value);
+    }
+
     command_queue.enqueue({command_type::activate, h, 0, 0, 0.0, 0, {}});
     if (sched.bp->output_terminals.size() > src_terminal)
         command_queue.enqueue({command_type::connect, h, 0, 0, 0.0, src_terminal, dest});

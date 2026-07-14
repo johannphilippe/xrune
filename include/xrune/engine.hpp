@@ -70,6 +70,13 @@ struct active_route {
 // queue, and a `tasks_remaining` atomic is the block barrier. Instances own
 // disjoint arenas and the master is summed single-threaded afterwards, so
 // parallel output is bit-identical to sequential.
+// A port value to write at spawn time, before the voice ever runs.
+struct initial_param {
+    size_t node = 0;
+    size_t param = 0;
+    sample_t value = 0.0;
+};
+
 struct engine {
     size_t sample_rate = 48000;
     size_t block_size = 128;
@@ -122,8 +129,12 @@ struct engine {
 
     // ---- Control-thread API ----
 
+    // `init` values are written on the CONTROL thread, into the freshly built
+    // instance, before it is activated -- so the voice STARTS at those values
+    // rather than ramping to them from the compiled defaults.
     instance_handle spawn(const compiled_schedule& sched, lifetime_policy life = {},
-                          route_target dest = {}, size_t src_terminal = 0);
+                          route_target dest = {}, size_t src_terminal = 0,
+                          const std::vector<initial_param>* init = nullptr);
 
     void kill(instance_handle h);
     void set_parameter(instance_handle h, size_t node_index, size_t param, sample_t value);

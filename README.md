@@ -50,7 +50,7 @@ RtAudio and readerwriterqueue are fetched by CMake. Needs C++20.
 ```bash
 cmake -S . -B build
 cmake --build build -j
-cd build && ctest              # 17 suites
+cd build && ctest              # 19 suites
 ```
 
 Optional Faust support:
@@ -272,6 +272,45 @@ rt.set(v, "amp", "gain", 0.5);          // by name
 
 param_ref g = rt.resolve(id, "amp", "gain");
 rt.set(v, g, 0.5);                      // no lookup on the hot path
+```
+
+### Rune parameters
+
+A rune's arguments are **compile-time** — they shape the graph, and are folded
+into the port defaults. But Xrune records which ports each one fed, so a host
+addresses them by **the name the user wrote**:
+
+```cpp
+const blueprint_info* bi = rt.describe(id);
+for (const auto& p : bi->params)
+    std::cout << p.name << " = " << p.default_value << "\n";   // f = 220, amp = 0.3
+
+rt.set_param(v, "amp", 0.6);           // by rune-parameter name, smoothed
+```
+
+**Spawn a voice at a value, with no glide:**
+
+```cpp
+spawn_options o;
+o.params = {{"f", 440.0}};             // this voice starts AT 440
+rt.spawn(id, o);
+```
+
+That matters: setting a port *after* spawn ramps from the compiled default over
+the first block — correct smoothing for changing a live voice, but a chirp on a
+note-on. `spawn_options::params` writes the value before the voice ever runs.
+
+**The honest caveat.** A parameter can only follow the ports it was passed to
+*directly* (`sine(freq = f)`, `osc * amp`). If it was also used inside an
+expression (`sine(freq = f * 2)`), that use was folded to a constant and cannot
+track the parameter at run time. Xrune reports this instead of letting you find
+out by ear — `rune_param_info::partial`, and `xrune -e` prints it:
+
+```
+tone  (4 nodes, 1 output terminal(s))
+    f = 220   [partial: also folded into an expression]
+    amp = 0.3
+    det = 1.01   [drives no port: folded into an expression]
 ```
 
 ### Voice lifetimes

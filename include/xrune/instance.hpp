@@ -224,6 +224,20 @@ struct graph_instance {
         }
     }
 
+    // Initialise a port at spawn time: writes current AND target, so the port
+    // starts *at* the value instead of ramping to it. set_parameter() smooths
+    // (right for changing a live voice, wrong for a note-on: it would glide from
+    // the compiled default to the requested pitch over the first block).
+    void init_parameter(size_t node_index, size_t param, sample_t value) {
+        const node* nd = sched->bp->nodes[node_index].get();
+        if (param >= nd->params_count()) return;
+        const port_descriptor* pd = nd->params();
+        if (pd) value = std::clamp(value, pd[param].min_value, pd[param].max_value);
+        port_control& c = controls[sched->param_base[node_index] + param];
+        c.current = value;
+        c.target  = value;
+    }
+
     void set_parameter(size_t node_index, size_t param, sample_t value) {
         const node* nd = sched->bp->nodes[node_index].get();
         if (param >= nd->params_count()) return;

@@ -174,7 +174,29 @@ voice runtime::spawn(blueprint_id id, const spawn_options& opt) {
         dest = route_target::to(opt.into.handle, static_cast<size_t>(dt));
     }
 
-    instance_handle h = eng.spawn(r->sched, opt.life, dest, src_term);
+    // Resolve the rune-parameter overrides into concrete port writes. An unknown
+    // name, or one that drives no port, is an ERROR: silently ignoring it would
+    // mean the voice quietly plays at the wrong pitch.
+    std::vector<initial_param> init;
+    for (const auto& kv : opt.params) {
+        const long pi = r->bp.find_rune_param(kv.first);
+        if (pi < 0) {
+            err = "spawn: unknown rune parameter '" + kv.first + "'";
+            return no_voice;
+        }
+        const blueprint_param& bpp = r->bp.params[static_cast<size_t>(pi)];
+        if (bpp.targets.empty()) {
+            err = "spawn: rune parameter '" + kv.first + "' drives no port "
+                  "(it is only used inside an expression, so it was folded at "
+                  "compile time)";
+            return no_voice;
+        }
+        for (const param_target& tg : bpp.targets)
+            init.push_back({tg.node, tg.port, kv.second});
+    }
+
+    instance_handle h = eng.spawn(r->sched, opt.life, dest, src_term,
+                                  init.empty() ? nullptr : &init);
     if (!h.valid()) { err = "spawn: instance pool exhausted"; return no_voice; }
     return voice{h, id};
 }
@@ -214,6 +236,26 @@ bool runtime::set(const voice& v, param_ref p, sample_t value) {
 bool runtime::set(const voice& v, const std::string& node, const std::string& port, sample_t value) {
     param_ref p = resolve(v.blueprint, node, port);
     return p.ok ? set(v, p, value) : false;
+}
+
+bool runtime::set_param(const voice& v, const std::string& name, sample_t value) {
+    if (!v.valid()) { err = "set_param: invalid voice"; return false; }
+    registered* r = get(v.blueprint);
+    if (!r) return false;
+
+    const long pi = r->bp.find_rune_param(name);
+    if (pi < 0) { err = "set_param: unknown rune parameter '" + name + "'"; return false; }
+
+    const blueprint_param& bpp = r->bp.params[static_cast<size_t>(pi)];
+    if (bpp.targets.empty()) {
+        err = "set_param: rune parameter '" + name + "' drives no port";
+        return false;
+    }
+    // Fan out to every port the parameter drives. Smoothed, like any other
+    // control-rate change (use spawn_options::params for a glide-free note-on).
+    for (const param_target& tg : bpp.targets)
+        eng.set_parameter(v.handle, tg.node, tg.port, value);
+    return true;
 }
 
 // ============================================================================
@@ -315,6 +357,8 @@ blueprint_info runtime::make_info(const registered& r) {
             ni.ports.push_back({pd[p].name, n->param_default(p), pd[p].min_value, pd[p].max_value});
         info.nodes.push_back(std::move(ni));
     }
+    for (const auto& p : r.bp.params)
+        info.params.push_back({p.name, p.default_value, p.targets.size(), p.partial});
     for (const auto& t : r.bp.input_terminals)  info.input_terminals.push_back(t.name);
     for (const auto& t : r.bp.output_terminals) info.output_terminals.push_back(t.name);
     return info;
