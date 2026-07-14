@@ -53,7 +53,30 @@ struct command_event {
     route_target dest{};
 };
 
-struct telemetry_event { uint32_t slot = 0; };
+// Why a voice ended. Travels with the reap event so a host can distinguish
+// "the note finished naturally" from "I killed it".
+enum class end_reason : uint8_t {
+    killed,        // explicit kill()
+    finished,      // the instance raised finished_flag
+    timed_out,     // lifetime_kind::timed expired
+    silent,        // lifetime_kind::until_silent
+};
+
+// Produced on the AUDIO thread when a voice is reaped, consumed on the control
+// thread by reclaim(). Carries the generation as well as the slot, so the host
+// can rebuild the exact handle it was given -- by the time it reads this, the
+// slot may already have been recycled to a new generation.
+struct telemetry_event {
+    uint32_t slot = 0;
+    uint32_t generation = 0;
+    end_reason reason = end_reason::killed;
+};
+
+// A voice that ended, as reported by reclaim().
+struct voice_end {
+    instance_handle handle{};
+    end_reason reason = end_reason::killed;
+};
 
 struct active_route {
     uint32_t src_slot = 0, src_gen = 0;
@@ -114,6 +137,7 @@ struct engine {
     std::vector<int> indeg_scratch;
     std::vector<uint32_t> order_scratch;
     std::vector<uint32_t> reap_scratch;
+    std::vector<end_reason> reap_reasons;
 
     engine() = default;
     ~engine();
@@ -141,7 +165,10 @@ struct engine {
     void connect(instance_handle src, size_t src_terminal, route_target dest);
     void disconnect(instance_handle src, size_t src_terminal, route_target dest);
 
-    size_t reclaim();
+    // Recycles reaped instances. If `out` is non-null, every voice that ended
+    // since the last call is appended to it (handle + reason) so the caller can
+    // notify a host. CONTROL THREAD ONLY.
+    size_t reclaim(std::vector<voice_end>* out = nullptr);
 
     bool is_valid(instance_handle h) const;
     size_t active_count() const;
@@ -189,9 +216,9 @@ private:
 
     static sample_t terminal_peak(graph_instance* g, size_t nf);
 
-    void release_slot(uint32_t slot);
+    void release_slot(uint32_t slot, end_reason why);
 
-    static bool should_reap(instance_slot& s, graph_instance* g, sample_t block_peak);
+    static bool should_reap(instance_slot& s, graph_instance* g, sample_t block_peak, end_reason& why);
 };
 
 } // namespace xrune

@@ -47,6 +47,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <functional>
 #include <cstdint>
 
 namespace xrune {
@@ -155,6 +156,23 @@ struct blueprint_builder {
 // Entry point for the fluent chain: xrune::build("name").add<...>(...)…
 blueprint_builder build(std::string name);
 
+// Why a voice ended.
+enum class voice_end_reason {
+    killed,     // you called kill()
+    finished,   // the voice raised its finished flag
+    timed_out,  // lifetime_kind::timed expired
+    silent,     // lifetime_kind::until_silent
+};
+
+// A voice that has ended. `v` is the handle you were given at spawn, so it can
+// be matched against whatever the host is holding.
+struct voice_event {
+    voice v;
+    voice_end_reason reason = voice_end_reason::killed;
+};
+
+const char* to_string(voice_end_reason r);
+
 // ============================================================================
 // Runtime facade: blueprint registry + engine. CONTROL-THREAD ONLY.
 // ============================================================================
@@ -198,6 +216,15 @@ struct runtime {
     bool inited = false;
     std::string err;
 
+private:
+    // Which blueprint each slot was spawned from, so an end event can be turned
+    // back into the full `voice` the host was handed.
+    std::vector<blueprint_id> slot_blueprint;
+    std::function<void(const voice_event&)> voice_end_cb;
+    std::vector<voice_end> ended_scratch;   // reused, so pump() does not allocate
+
+public:
+
     // ---- Lifecycle ----
 
     // Inject a backend (e.g. offline_backend for tests) before init().
@@ -234,8 +261,19 @@ struct runtime {
     // auto-reaped voice becomes false after the next pump().
     bool alive(const voice& v) const;
 
-    // Recycle finished/killed instances (call periodically from the control
-    // loop). Returns how many were reclaimed.
+    // Called for every voice that has ended, from inside pump().
+    //
+    // The callback runs on the CONTROL THREAD, never on the audio thread: the
+    // audio thread only pushes a {slot, generation, reason} record onto a
+    // lock-free queue, and pump() drains it. So the callback may allocate, lock,
+    // log, or call back into the runtime -- it cannot cause an audio glitch.
+    //
+    // This is the push half of the lifetime API: alive()/pump() only tell a host
+    // that *something* changed, and force it to poll every handle it holds.
+    void on_voice_end(std::function<void(const voice_event&)> cb);
+
+    // Recycle ended instances (call periodically from the control loop) and fire
+    // the on_voice_end callback for each. Returns how many were reclaimed.
     size_t pump();
 
     size_t active_voices() const;

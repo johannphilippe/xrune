@@ -104,6 +104,28 @@ bool runtime::init(const runtime_config& c) {
     return inited;
 }
 
+// pump() maps engine::end_reason onto the public voice_end_reason positionally.
+// Pin that down: if either enum is ever reordered, this fails at compile time
+// instead of silently reporting "killed" for a note that timed out.
+static_assert(static_cast<int>(end_reason::killed)    == static_cast<int>(voice_end_reason::killed));
+static_assert(static_cast<int>(end_reason::finished)  == static_cast<int>(voice_end_reason::finished));
+static_assert(static_cast<int>(end_reason::timed_out) == static_cast<int>(voice_end_reason::timed_out));
+static_assert(static_cast<int>(end_reason::silent)    == static_cast<int>(voice_end_reason::silent));
+
+const char* to_string(voice_end_reason r) {
+    switch (r) {
+        case voice_end_reason::killed:    return "killed";
+        case voice_end_reason::finished:  return "finished";
+        case voice_end_reason::timed_out: return "timed_out";
+        case voice_end_reason::silent:    return "silent";
+    }
+    return "?";
+}
+
+void runtime::on_voice_end(std::function<void(const voice_event&)> cb) {
+    voice_end_cb = std::move(cb);
+}
+
 bool runtime::start() { return eng.start(); }
 void runtime::stop()  { eng.stop(); }
 
@@ -198,6 +220,13 @@ voice runtime::spawn(blueprint_id id, const spawn_options& opt) {
     instance_handle h = eng.spawn(r->sched, opt.life, dest, src_term,
                                   init.empty() ? nullptr : &init);
     if (!h.valid()) { err = "spawn: instance pool exhausted"; return no_voice; }
+
+    // Remember which blueprint this slot came from, so an end event can be
+    // reported as the full `voice` the caller is holding.
+    if (h.slot >= slot_blueprint.size())
+        slot_blueprint.resize(h.slot + 1, invalid_blueprint);
+    slot_blueprint[h.slot] = id;
+
     return voice{h, id};
 }
 
@@ -209,7 +238,24 @@ bool runtime::alive(const voice& v) const {
     return v.valid() && eng.is_valid(v.handle);
 }
 
-size_t runtime::pump() { return eng.reclaim(); }
+size_t runtime::pump() {
+    if (!voice_end_cb) return eng.reclaim();
+
+    ended_scratch.clear();
+    const size_t n = eng.reclaim(&ended_scratch);
+
+    // Fire on the control thread, after reclaim: by now the slot is recycled, so
+    // a callback that spawns a replacement voice can reuse it immediately.
+    for (const voice_end& e : ended_scratch) {
+        const blueprint_id id = (e.handle.slot < slot_blueprint.size())
+                              ? slot_blueprint[e.handle.slot] : invalid_blueprint;
+        voice_event ev;
+        ev.v = voice{e.handle, id};
+        ev.reason = static_cast<voice_end_reason>(e.reason);
+        voice_end_cb(ev);
+    }
+    return n;
+}
 
 size_t runtime::active_voices() const { return eng.active_count(); }
 

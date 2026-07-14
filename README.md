@@ -50,7 +50,7 @@ RtAudio and readerwriterqueue are fetched by CMake. Needs C++20.
 ```bash
 cmake -S . -B build
 cmake --build build -j
-cd build && ctest              # 19 suites
+cd build && ctest              # 20 suites
 ```
 
 Optional Faust support:
@@ -325,6 +325,29 @@ rt.spawn(id, o);
 
 `permanent` (default) · `timed` · `until_finished` · `until_silent`. Reaped
 voices are recycled; `rt.pump()` collects them on the control thread.
+
+### Voice-end events (push, not poll)
+
+Rather than polling `alive()` on every handle it holds, a host can be told:
+
+```cpp
+rt.on_voice_end([&](const voice_event& e) {
+    std::cout << "voice ended: " << to_string(e.reason) << "\n";  // killed / finished
+    sequencer.note_off(e.v);                                       // timed_out / silent
+});
+
+rt.pump();   // fires the callbacks
+```
+
+**The callback runs on the control thread, inside `pump()` — never on the audio
+thread.** The audio thread only pushes a `{slot, generation, reason}` record onto
+a lock-free queue. So the callback may allocate, lock, log, or call back into the
+runtime without any risk of an audio glitch — including **spawning a replacement
+voice**, which is how a sequencer chains the next note (the slot is already
+recycled by the time the callback runs).
+
+The event carries the handle you were given at spawn, so it matches whatever the
+host is holding.
 
 ### Routing between voices
 
