@@ -601,6 +601,46 @@ Two ways to host [Faust](https://faust.grame.fr) DSP, both behind CMake options:
 Faust parameters become ordinary Xrune ports, so they smooth, modulate and
 serialize like any other. Register one as a DSL word and it's an Xrune node.
 
+### `faustlib` — the whole Faust standard library, from Xrune
+
+With the JIT enabled, any function of the Faust standard libraries is a node:
+
+```rune
+rune f()
+  out sine(220) : faustlib("ve.korg35LPF") * 0.4   // ports: normFreq, Q
+end
+```
+
+Xrune writes the Faust source, JIT-compiles it, and **caches the factory** — the
+same function used twenty times compiles once.
+
+Two things it does *not* guess:
+
+- **Arity and ports come from libfaust**, never from parsed documentation. The
+  function's parameters become real Xrune ports (`rt.set(v, "filter", "normFreq", …)`).
+- **Compile-time arguments** (a filter order, a table size) *cannot* be sliders.
+  They must be given as literals, and omitting one is a clear error naming the
+  argument — not a baffling Faust message about source you never wrote:
+
+```rune
+lp = faustlib("fi.lowpass", N = 3)     // N is compile-time; fc is a port
+```
+
+The index of library functions is generated and **verified by compiling every one
+of them**:
+
+```bash
+python3 tools/faustlib_scan.py --verify -o data/faustlib.json
+```
+
+788 of 923 functions are verified to compile. The scan mines the libraries' own
+documentation for parameter names and ranges, and the verify pass lets *Faust*
+correct it — when Faust says an argument "must be a constant numerical
+expression", the index records it as compile-time. Ranges come from the library
+authors' own test sliders where they exist (72 of them); where they don't, the
+index uses a wide range rather than invent a narrow one, because a fabricated
+`0..1` on a cutoff in Hz would silently clamp 2000 Hz to 1.
+
 > If the JIT segfaults inside `getNumInputs()`, your `libfaust.so` doesn't match
 > the Faust headers you built against — an ABI mismatch, not an Xrune bug.
 

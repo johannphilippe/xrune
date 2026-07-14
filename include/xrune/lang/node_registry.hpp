@@ -20,8 +20,12 @@
 #include "xrune/core.hpp"
 #include "xrune/node/standard_nodes.hpp"
 #include "xrune/node/fft.hpp"
+#if defined(XRUNE_WITH_FAUST_LLVM)
+#include "xrune/node/faust/faust_lib.hpp"
+#endif
 #include <string>
 #include <vector>
+#include <map>
 #include <unordered_map>
 #include <functional>
 #include <memory>
@@ -73,6 +77,26 @@ struct node_args {
         if (const auto* v = find_named(name); v && v->k == arg_value::kind::string) return v->str;
         return def;
     }
+    // Named wins, else the positional slot. `faustlib("si.smoo")` passes the
+    // function name positionally.
+    std::string str(const std::string& name, size_t pos, const std::string& def = "") const {
+        if (const auto* v = find_named(name); v && v->k == arg_value::kind::string) return v->str;
+        if (pos < positional.size() && positional[pos].k == arg_value::kind::string)
+            return positional[pos].str;
+        return def;
+    }
+    // Every named numeric argument except the ones listed -- used by faustlib to
+    // collect parameter overrides (`faustlib("fi.lowpass", N = 3)`).
+    std::map<std::string, double> numeric_named_except(const std::vector<std::string>& skip) const {
+        std::map<std::string, double> out;
+        for (const auto& kv : named) {
+            if (kv.second.k != arg_value::kind::number) continue;
+            bool skipped = false;
+            for (const auto& s : skip) if (s == kv.first) { skipped = true; break; }
+            if (!skipped) out[kv.first] = kv.second.number;
+        }
+        return out;
+    }
 };
 
 struct node_registry {
@@ -113,6 +137,14 @@ inline node_registry standard_registry() {
     r.add("s2m",      [](const node_args&)  { return std::make_unique<stereo_to_mono>(); });
     r.add("inv",      [](const node_args&)  { return std::make_unique<inverter>(); });
     r.add("sinv",     [](const node_args&)  { return std::make_unique<stereo_inverter>(); });
+#if defined(XRUNE_WITH_FAUST_LLVM)
+    // faustlib("ve.korg35LPF")            -> the function's control params become ports
+    // faustlib("fi.lowpass", N = 3)       -> N is a compile-time argument
+    // Compiled once per (function, compile-time args) and shared.
+    r.add("faustlib", [](const node_args& a) {
+        return make_faustlib(a.str("name", 0), a.numeric_named_except({"name"}));
+    }, {"name"});
+#endif
     r.add("counter",  [](const node_args&)  { return std::make_unique<call_counter>(); });
     r.add("add",      [](const node_args&)  { return std::make_unique<add>(); });
     r.add("mul",      [](const node_args&)  { return std::make_unique<multiply>(); });

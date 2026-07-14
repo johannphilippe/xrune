@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <cmath>
+#include <stdexcept>
 
 // Xrune lang semantic analysis + lowering: AST -> graph_blueprint. Each expression
 // evaluates to a `value`, either a compile-time number or a `fragment` (a
@@ -531,7 +532,19 @@ struct lowerer {
         if (sigils.count(name)) return eval_sigil(e, env);
         if (reg.has(name)) {
             node_args na = eval_node_args(e.args, env);
-            std::unique_ptr<node> nd = reg.make(name, na);
+            // A factory may throw -- faustlib() compiles Faust source, and that
+            // can fail on an unknown function or a missing compile-time argument.
+            // Turn it into a diagnostic WITH a source position, rather than an
+            // exception escaping the compiler.
+            std::unique_ptr<node> nd;
+            try {
+                nd = reg.make(name, na);
+            } catch (const lang_abort&) {
+                throw;
+            } catch (const std::exception& ex) {
+                fail(e.line, e.col, std::string("'") + name + "': " + ex.what());
+            }
+            if (!nd) fail(e.line, e.col, "'" + name + "': factory returned nothing");
             std::string nm = preferred.empty() ? gen(name) : preferred;
             size_t idx = add(std::move(nd), nm);
             bind_rune_params(e.args, idx);

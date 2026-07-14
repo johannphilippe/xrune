@@ -58,7 +58,7 @@ struct options {
     std::string output;     // "" = stdout (png derives a name instead)
     int seconds = 5;
     size_t sample_rate = 48000;
-    size_t block_size = 256;
+    size_t block_size = 64;
     int indent = 2;         // 0 = compact JSON
 };
 
@@ -82,7 +82,7 @@ void usage() {
 "  -o, --output FILE   write to FILE (default: stdout; --png: <file>.png)\n"
 "  -s, --seconds N     how long to play, in run mode (default: 5)\n"
 "      --sample-rate N (default: 48000)\n"
-"      --block-size N  power of two (default: 256)\n"
+"      --block-size N  power of two (default: 64)\n"
 "      --compact       JSON on a single line\n"
 "  -h, --help\n"
 "  -v, --version\n"

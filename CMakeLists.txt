@@ -131,6 +131,26 @@ endif()
 if(XRUNE_WITH_FAUST_LLVM)
     target_link_libraries(xrune PUBLIC ${FAUST_LIB})
     target_compile_definitions(xrune PUBLIC XRUNE_WITH_FAUST_LLVM)
+
+    # faustlib(): reach the Faust standard libraries from Xrune. Needs the index
+    # produced by tools/faustlib_scan.py (data/faustlib.json), found at run time
+    # via $XRUNE_FAUSTLIB_JSON, then this baked-in path, then ./data.
+    target_sources(xrune PRIVATE src/node/faust_lib.cpp)
+    target_compile_definitions(xrune PRIVATE
+        XRUNE_FAUSTLIB_JSON_PATH="${CMAKE_INSTALL_FULL_DATADIR}/xrune/faustlib.json")
+
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data/faustlib.json)
+        # Mirror it into the build tree: tests and ./build/xrune look for
+        # "data/faustlib.json" relative to the working directory.
+        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/faustlib.json
+                       ${CMAKE_CURRENT_BINARY_DIR}/data/faustlib.json COPYONLY)
+        install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/faustlib.json
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/xrune)
+    else()
+        message(WARNING "data/faustlib.json is missing -- faustlib() will only "
+                        "handle zero-argument functions. Generate it with:\n"
+                        "  python3 tools/faustlib_scan.py --verify -o data/faustlib.json")
+    endif()
 endif()
 
 # Kept so existing targets keep working; xrune::xrune is the name to use.
@@ -213,12 +233,15 @@ if(XRUNE_BUILD_TESTS)
     target_compile_definitions(test_lang_lower PRIVATE
         XRUNE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
+
     # --- Faust node tests (only when the options are enabled) ---
     if(XRUNE_WITH_FAUST_LLVM)
-        foreach(t IN ITEMS faust_jit lang_faust)
+        foreach(t IN ITEMS faust_jit lang_faust faustlib)
             add_executable(test_${t} tests/test_${t}.cpp)
             target_link_libraries(test_${t} PRIVATE xrune::xrune)
             target_include_directories(test_${t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+            target_compile_definitions(test_${t} PRIVATE
+                XRUNE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
             add_test(NAME ${t} COMMAND test_${t})
         endforeach()
     endif()
