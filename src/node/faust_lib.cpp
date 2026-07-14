@@ -23,6 +23,12 @@
 #include <fstream>
 #include <sstream>
 
+#if defined(__linux__)
+#include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
 namespace xrune {
 
 // ---------------------------------------------------------------------------
@@ -76,6 +82,33 @@ bool faustlib_index::load(const std::string& path, std::string& err) {
     return load_json(ss.str(), err);
 }
 
+namespace {
+
+// Directory holding the running executable, or "" if we cannot tell.
+//
+// This is what makes the index RELOCATABLE. The configure-time
+// XRUNE_FAUSTLIB_JSON_PATH is baked from CMAKE_INSTALL_PREFIX, so a later
+// `cmake --install --prefix /somewhere/else` leaves it pointing at /usr/local --
+// the same trap that bit the rpath. Resolving relative to the executable is the
+// $ORIGIN equivalent, and works from any prefix.
+std::string exe_dir() {
+    std::string path;
+#if defined(__linux__)
+    char buf[4096];
+    const ssize_t n = ::readlink("/proc/self/exe", buf, sizeof buf - 1);
+    if (n > 0) { buf[n] = '\0'; path = buf; }
+#elif defined(__APPLE__)
+    char buf[4096];
+    uint32_t size = sizeof buf;
+    if (_NSGetExecutablePath(buf, &size) == 0) path = buf;
+#endif
+    if (path.empty()) return {};
+    const size_t slash = path.find_last_of('/');
+    return (slash == std::string::npos) ? std::string{} : path.substr(0, slash);
+}
+
+} // namespace
+
 faustlib_index& faustlib_index::standard() {
     static faustlib_index idx;
     static bool tried = false;
@@ -83,19 +116,33 @@ faustlib_index& faustlib_index::standard() {
     tried = true;
 
     std::vector<std::string> candidates;
+
+    // 1. An explicit override always wins.
     if (const char* env = std::getenv("XRUNE_FAUSTLIB_JSON"))
         candidates.emplace_back(env);
+
+    // 2. Relative to the executable -- relocatable, so it works from ANY install
+    //    prefix, and from the build tree.
+    if (const std::string dir = exe_dir(); !dir.empty()) {
+        candidates.emplace_back(dir + "/../share/xrune/faustlib.json");  // installed
+        candidates.emplace_back(dir + "/data/faustlib.json");            // build tree
+    }
+
+    // 3. The configure-time install path (correct only when the prefix used at
+    //    install time matches the one used at configure time).
 #ifdef XRUNE_FAUSTLIB_JSON_PATH
     candidates.emplace_back(XRUNE_FAUSTLIB_JSON_PATH);
 #endif
+
+    // 4. Relative to the working directory (running from the source tree).
     candidates.emplace_back("data/faustlib.json");
 
     std::string err;
     for (const auto& c : candidates)
         if (idx.load(c, err)) return idx;
 
-    // Not fatal: a zero-argument function still works without any index. Only a
-    // function with parameters actually needs one, and make_faustlib says so.
+    // Left empty: make_faustlib() reports the failure with the search advice,
+    // rather than guessing and producing a node with the wrong arity.
     return idx;
 }
 

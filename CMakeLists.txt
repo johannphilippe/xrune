@@ -140,6 +140,7 @@ if(XRUNE_WITH_FAUST_LLVM)
         XRUNE_FAUSTLIB_JSON_PATH="${CMAKE_INSTALL_FULL_DATADIR}/xrune/faustlib.json")
 
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data/faustlib.json)
+        message(STATUS "install datadir : ${CMAKE_INSTALL_FULL_DATADIR}")
         # Mirror it into the build tree: tests and ./build/xrune look for
         # "data/faustlib.json" relative to the working directory.
         configure_file(${CMAKE_CURRENT_SOURCE_DIR}/data/faustlib.json
