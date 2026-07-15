@@ -45,6 +45,7 @@ struct graph_instance {
     std::byte* state_region = nullptr;
     sample_t* buffer_pool = nullptr;       // total_output_samples
     sample_t* silent = nullptr;            // read-only zeros, >= max slice size
+    size_t silent_len = 0;                 // usable length of `silent`
     audio_buffer_view* views = nullptr;    // flattened per-(node,call) in/out views
     node_processing_context* contexts = nullptr; // one per (node,call)
     port_control* controls = nullptr;      // per control port
@@ -110,6 +111,7 @@ struct graph_instance {
             ? static_cast<sample_t*>(arena.allocate(s.total_output_samples * sizeof(sample_t), simd_align))
             : nullptr;
         silent = static_cast<sample_t*>(arena.allocate(silent_size * sizeof(sample_t), simd_align));
+        silent_len = silent_size;
         views = total_views ? arena.allocate_array<audio_buffer_view>(total_views) : nullptr;
         contexts = arena.allocate_array<node_processing_context>(s.total_calls);
         controls = s.total_params ? arena.allocate_array<port_control>(s.total_params) : nullptr;
@@ -274,6 +276,8 @@ struct graph_instance {
         const auto& term = sched->bp->output_terminals[t];
         if (!term.channels.empty()) {
             const terminal_source& src = term.channels[ch];
+            if (src.silent)                              // an unassigned channel
+                return audio_buffer_view(silent, silent_len);
             return node_output_view(src.node, src.ch);   // (node, channel) source
         }
         return node_output_view(term.node, ch);

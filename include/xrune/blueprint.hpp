@@ -49,6 +49,7 @@ struct param_connection {
 struct terminal_source {
     size_t node = 0;
     size_t ch = 0;
+    bool silent = false;   // an unassigned output channel: emits zeros
 };
 
 // A named bus exposed by the blueprint.

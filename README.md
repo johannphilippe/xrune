@@ -509,10 +509,16 @@ out[1] stereo[0]         // right out <- left in
 ```
 
 `out expr` is exactly `out[0] expr`; a signal's channels fill consecutive indices
-from the base. Output channels must be contiguous from 0 — a gap (`out[1]` with no
-`out[0]`) or assigning a channel twice is a compile error. Because the output
-terminal now gathers per-channel, `out (a , b)` may draw its channels from
-different nodes; no single summing node is required.
+from the base. **Unassigned channels are silent**, so you can place a signal on
+output 5 of a multichannel device and leave 0–4 untouched:
+
+```rune
+out[5] click            // channels 0..4 emit zeros
+```
+
+Assigning the same channel twice is a compile error. Because the output terminal
+now gathers per-channel, `out (a , b)` may draw its channels from different nodes;
+no single summing node is required.
 
 ### Multi-rate
 

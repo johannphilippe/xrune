@@ -328,29 +328,28 @@ struct lowerer {
     }
 
     // Turn the accumulated per-index sources into each terminal's channel list.
-    // Output channels must be contiguous from 0: a gap (out[2] with no out[0])
-    // is rejected rather than silently producing dead channels.
+    // Gaps are allowed and become SILENT channels: `out[5] x` alone is a valid
+    // request to place x on output 5 (multichannel hardware), with 0..4 emitting
+    // zeros. Only a double-assignment of the same channel is an error, and that
+    // is caught in do_out.
     void finalize_outputs() {
         for (const std::string& name : out_order) {
             const out_acc& acc = out_terminals[name];
-            std::vector<terminal_source> chans;
-            chans.reserve(acc.by_index.size());
-            size_t expect = 0;
+            const size_t n = acc.by_index.empty() ? 0 : acc.by_index.rbegin()->first + 1;
+
+            std::vector<terminal_source> chans(n);          // default: silent
+            for (auto& c : chans) c.silent = true;
+            long first_real = -1;
             for (const auto& kv : acc.by_index) {
-                if (kv.first != expect)
-                    fail(acc.line, acc.col, "output terminal '" + name + "' has a gap: channel " +
-                                            std::to_string(expect) + " is not assigned (highest is " +
-                                            std::to_string(acc.by_index.rbegin()->first) + ")");
-                chans.push_back({kv.second.node, kv.second.ch});
-                ++expect;
+                chans[kv.first] = {kv.second.node, kv.second.ch, false};
+                if (first_real < 0) first_real = static_cast<long>(kv.second.node);
             }
-            const size_t ti = bp->add_output_terminal(name, chans);
-            if (name == "out") {
+
+            bp->add_output_terminal(name, chans);
+            if (name == "out" && first_real >= 0)
                 // output_view() (a convenience read of a single-node graph) uses
-                // output_node; point it at the first source.
-                bp->output_node = static_cast<long>(chans.front().node);
-                (void)ti;
-            }
+                // output_node; point it at the first real source.
+                bp->output_node = first_real;
         }
     }
 
