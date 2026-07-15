@@ -263,13 +263,20 @@ struct graph_instance {
     size_t output_terminal_count() const { return sched->bp->output_terminals.size(); }
     size_t input_terminal_count() const { return sched->bp->input_terminals.size(); }
     size_t output_terminal_channels(size_t t) const {
-        return sched->bp->nodes[sched->bp->output_terminals[t].node]->outputs_count();
+        const auto& term = sched->bp->output_terminals[t];
+        if (!term.channels.empty()) return term.channels.size();
+        return sched->bp->nodes[term.node]->outputs_count();
     }
     size_t input_terminal_channels(size_t t) const {
         return sched->bp->nodes[sched->bp->input_terminals[t].node]->outputs_count();
     }
     audio_buffer_view output_terminal_view(size_t t, size_t ch) const {
-        return node_output_view(sched->bp->output_terminals[t].node, ch);
+        const auto& term = sched->bp->output_terminals[t];
+        if (!term.channels.empty()) {
+            const terminal_source& src = term.channels[ch];
+            return node_output_view(src.node, src.ch);   // (node, channel) source
+        }
+        return node_output_view(term.node, ch);
     }
     audio_buffer_view input_terminal_view(size_t t, size_t ch) const {
         return node_output_view(sched->bp->input_terminals[t].node, ch);

@@ -181,6 +181,10 @@ struct parser {
         auto s = std::make_unique<stmt>(stmt::kind::out);
         s->line = cur().line; s->col = cur().col;
         adv(); // 'out'
+        if (accept(Tok::LBracket)) {          // out[i] expr -> place at output index i
+            s->out_index = parse_index();
+            expect(Tok::RBracket, "']'");
+        }
         s->expr_ = parse_expr(false);
         if (accept(Tok::KwAs)) {
             Token t = expect(Tok::Ident, "terminal name after 'as'");

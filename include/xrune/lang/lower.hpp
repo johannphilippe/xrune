@@ -87,6 +87,13 @@ struct lowerer {
     std::unordered_map<std::string, size_t> uses;         // every evaluation
     std::unordered_map<std::string, size_t> direct_uses;  // bound to a port
 
+    // Output-terminal channels accumulated across `out` statements:
+    // terminal name -> (output channel index -> source). Materialised, with
+    // contiguity/conflict checks, once the rune body is fully lowered.
+    struct out_acc { std::map<size_t, chan> by_index; int line = 0, col = 0; };
+    std::map<std::string, out_acc> out_terminals;
+    std::vector<std::string> out_order;   // terminal creation order ("out" first)
+
     lowerer(const node_registry& r, diagnostics& d) : reg(r), diags(d) {}
 
     [[noreturn]] void fail(int line, int col, const std::string& m) {
@@ -205,6 +212,8 @@ struct lowerer {
         rune_params.clear();
         uses.clear();
         direct_uses.clear();
+        out_terminals.clear();
+        out_order.clear();
 
         for (const auto& p : r.params) {
             if (!p.default_value)
@@ -222,6 +231,7 @@ struct lowerer {
 
         bool have_out = false;
         for (const auto& s : r.body) do_stmt(*s, env, defined, &have_out);
+        finalize_outputs();
 
         // A parameter used more times than it was bound directly to a port has
         // at least one use that got folded into a constant (`f * 2`). That use
@@ -290,18 +300,57 @@ struct lowerer {
     void do_out(const stmt& s, env_t& env, bool& have_out) {
         fragment f = eval_fragment(*s.expr_, env);
         if (f.outs.empty()) fail(s.line, s.col, "'out' expression produces no output");
-        size_t node0 = f.outs[0].node;
-        for (const auto& o : f.outs)
-            if (o.node != node0)
-                fail(s.line, s.col, "'out' must be a single node (its channels come from more than "
-                                    "one node); sum them with a mixer/fader first");
-        if (s.terminal.empty()) {
-            if (have_out) fail(s.line, s.col, "only one plain 'out' allowed; use 'out X as name' for extra terminals");
-            bp->set_output(node0);
-            have_out = true;
-        } else {
-            if (s.terminal == "out") fail(s.line, s.col, "'as out' is reserved; use a plain 'out'");
-            bp->add_output_terminal(s.terminal, node0);
+
+        const std::string name = s.terminal.empty() ? "out" : s.terminal;
+        if (!s.terminal.empty() && s.terminal == "out")
+            fail(s.line, s.col, "'as out' is reserved; use a plain 'out'");
+        auto it = out_terminals.find(name);
+        if (it == out_terminals.end()) {
+            out_terminals[name] = out_acc{};
+            out_terminals[name].line = s.line;
+            out_terminals[name].col = s.col;
+            out_order.push_back(name);
+            it = out_terminals.find(name);
+        }
+
+        // A signal's channels land at consecutive output indices from the base.
+        // Unindexed `out` is base 0, so a second plain `out` collides at 0 -- a
+        // clear error instead of the old ad-hoc "only one plain out" rule.
+        const size_t base = (s.out_index < 0) ? 0 : static_cast<size_t>(s.out_index);
+        for (size_t c = 0; c < f.outs.size(); ++c) {
+            const size_t idx = base + c;
+            if (it->second.by_index.count(idx))
+                fail(s.line, s.col, "output channel " + std::to_string(idx) + " of terminal '" +
+                                    name + "' is assigned more than once");
+            it->second.by_index[idx] = f.outs[c];
+        }
+        if (name == "out") have_out = true;
+    }
+
+    // Turn the accumulated per-index sources into each terminal's channel list.
+    // Output channels must be contiguous from 0: a gap (out[2] with no out[0])
+    // is rejected rather than silently producing dead channels.
+    void finalize_outputs() {
+        for (const std::string& name : out_order) {
+            const out_acc& acc = out_terminals[name];
+            std::vector<terminal_source> chans;
+            chans.reserve(acc.by_index.size());
+            size_t expect = 0;
+            for (const auto& kv : acc.by_index) {
+                if (kv.first != expect)
+                    fail(acc.line, acc.col, "output terminal '" + name + "' has a gap: channel " +
+                                            std::to_string(expect) + " is not assigned (highest is " +
+                                            std::to_string(acc.by_index.rbegin()->first) + ")");
+                chans.push_back({kv.second.node, kv.second.ch});
+                ++expect;
+            }
+            const size_t ti = bp->add_output_terminal(name, chans);
+            if (name == "out") {
+                // output_view() (a convenience read of a single-node graph) uses
+                // output_node; point it at the first source.
+                bp->output_node = static_cast<long>(chans.front().node);
+                (void)ti;
+            }
         }
     }
 

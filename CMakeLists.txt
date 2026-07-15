@@ -222,7 +222,7 @@ if(XRUNE_BUILD_TESTS)
     set(XRUNE_TESTS
         arena offline instance nodes ports multirate routing lifetime
         parallel rt_safety fft api serialize
-        lang_parse lang_registry lang_lower lang_arith lang_params events)
+        lang_parse lang_registry lang_lower lang_arith lang_params lang_out events)
 
     foreach(t IN LISTS XRUNE_TESTS)
         add_executable(test_${t} tests/test_${t}.cpp)

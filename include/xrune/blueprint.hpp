@@ -44,9 +44,27 @@ struct param_connection {
 // A named bus exposed by the blueprint. An output terminal reads a node's
 // outputs (the instance's signal out); an input terminal points at a bus_input
 // node whose outputs the engine fills from routed upstream instances.
+// One source channel of an output terminal: a specific (node, channel) whose
+// signal appears at a specific position in the terminal's channel list.
+struct terminal_source {
+    size_t node = 0;
+    size_t ch = 0;
+};
+
+// A named bus exposed by the blueprint.
+//
+// An INPUT terminal is a single bus node (`node`) the engine fills; its channels
+// are that node's outputs, so `channels` is left empty.
+//
+// An OUTPUT terminal is a list of source channels, in output order: channel c of
+// the terminal comes from `channels[c]`. This lets `out[0] a` / `out[1] b` place
+// distinct signals on distinct output indices, from different nodes. When
+// `channels` is empty the terminal falls back to `node` (all of one node's
+// outputs) -- the single-node case, and how input terminals always work.
 struct terminal {
     std::string name;
     size_t node = 0;
+    std::vector<terminal_source> channels;
 };
 
 // One port a rune parameter drives.
@@ -129,7 +147,21 @@ struct graph_blueprint {
     }
 
     size_t add_output_terminal(const std::string& name, size_t node) {
-        output_terminals.push_back({name, node});
+        terminal t;
+        t.name = name;
+        t.node = node;
+        for (size_t c = 0; c < nodes[node]->outputs_count(); ++c)
+            t.channels.push_back({node, c});
+        output_terminals.push_back(std::move(t));
+        return output_terminals.size() - 1;
+    }
+    // Indexed / multi-source output terminal: channel c comes from chans[c].
+    size_t add_output_terminal(const std::string& name, std::vector<terminal_source> chans) {
+        terminal t;
+        t.name = name;
+        t.node = chans.empty() ? 0 : chans.front().node;   // for output_view convenience
+        t.channels = std::move(chans);
+        output_terminals.push_back(std::move(t));
         return output_terminals.size() - 1;
     }
     size_t add_input_terminal(const std::string& name, size_t node) {

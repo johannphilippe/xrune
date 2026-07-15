@@ -101,6 +101,7 @@ struct stmt {
 
     // out: expr [as terminal]
     std::string terminal; // "" -> "out"
+    int out_index = -1;   // out[i] ... ; -1 means unindexed (base 0)
 
     explicit stmt(kind kk) : k(kk) {}
 };

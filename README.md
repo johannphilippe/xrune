@@ -50,7 +50,7 @@ RtAudio and readerwriterqueue are fetched by CMake. Needs C++20.
 ```bash
 cmake -S . -B build
 cmake --build build -j
-cd build && ctest              # 20 suites
+cd build && ctest              # 21 suites
 ```
 
 Optional Faust support:
@@ -495,9 +495,24 @@ a[1] -> b[0]          // an explicit wire, when the algebra is the wrong tool
 
 ```rune
 input in(channels = 2)   // a bus other voices can be routed into
-out mix                  // this voice's output
+out mix                  // this voice's output (channels 0..N-1)
 out send as aux          // a second, named output terminal
 ```
+
+**Channel indices.** Read a specific input channel with `[i]`, and place a signal
+on a specific output channel with `out[i]`:
+
+```rune
+input stereo(channels = 2)
+out[0] stereo[1]         // swap: left out  <- right in
+out[1] stereo[0]         // right out <- left in
+```
+
+`out expr` is exactly `out[0] expr`; a signal's channels fill consecutive indices
+from the base. Output channels must be contiguous from 0 — a gap (`out[1]` with no
+`out[0]`) or assigning a channel twice is a compile error. Because the output
+terminal now gathers per-channel, `out (a , b)` may draw its channels from
+different nodes; no single summing node is required.
 
 ### Multi-rate
 

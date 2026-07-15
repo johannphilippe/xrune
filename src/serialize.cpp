@@ -91,6 +91,16 @@ json::value to_json_value(const graph_blueprint& bp, const std::string& name) {
             json::value jt = json::value::make_object();
             jt.set("name", json::value(t.name));
             jt.set("node", json::value(double(t.node)));
+            if (!t.channels.empty()) {   // output terminals: per-channel sources
+                json::value chans = json::value::make_array();
+                for (const terminal_source& c : t.channels) {
+                    json::value jc = json::value::make_object();
+                    jc.set("node", json::value(double(c.node)));
+                    jc.set("ch", json::value(double(c.ch)));
+                    chans.push(std::move(jc));
+                }
+                jt.set("channels", std::move(chans));
+            }
             a.push(std::move(jt));
         }
         return a;
@@ -202,7 +212,17 @@ bool from_json(const std::string& text,
         for (const json::value& t : jt->arr) {
             const long nd = t.integer("node", -1);
             if (!valid(nd)) { err = std::string(key) + " references an unknown node"; return false; }
-            dst.push_back({t.text("name"), size_t(nd)});
+            terminal term;
+            term.name = t.text("name");
+            term.node = size_t(nd);
+            if (const json::value* ch = t.find("channels"); ch && ch->is_array()) {
+                for (const json::value& c : ch->arr) {
+                    const long cn = c.integer("node", -1);
+                    if (!valid(cn)) { err = std::string(key) + " channel references an unknown node"; return false; }
+                    term.channels.push_back({size_t(cn), size_t(c.integer("ch", 0))});
+                }
+            }
+            dst.push_back(std::move(term));
         }
         return true;
     };
